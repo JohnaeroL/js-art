@@ -23,11 +23,14 @@ async function setup() {
   return { tmp, root, toolDir, server, base };
 }
 
-/* raw request so the client does not normalise ../ away */
-const rawGet = (port, p) => new Promise((resolve, reject) => {
-  const s = net.connect(port, '127.0.0.1', () => s.write(`GET ${p} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`));
+/* raw request so the client does not normalise ../ away and any Host/Origin can be sent */
+const raw = (port, { method = 'GET', path: p = '/', headers = {}, body = '' } = {}) => new Promise((resolve, reject) => {
+  const h = { Host: `127.0.0.1:${port}`, Connection: 'close', 'Content-Length': Buffer.byteLength(body), ...headers };
+  const head = Object.entries(h).map(([k, v]) => `${k}: ${v}`).join('@@');
+  const s = net.connect(port, '127.0.0.1', () => s.write(`${method} ${p} HTTP/1.1@@${head}@@@@${body}`.split('@@').join(String.fromCharCode(13, 10))));
   let d = ''; s.on('data', c => d += c); s.on('end', () => resolve(+d.split(' ')[1])); s.on('error', reject);
 });
+const rawGet = (port, p) => raw(port, { path: p });
 
 test('server: injection, static files, traversal guard, client files, save + state', async t => {
   const { tmp, root, server, base } = await setup();
@@ -61,8 +64,27 @@ test('server: injection, static files, traversal guard, client files, save + sta
   assert.equal(await fs.readFile(path.join(root, 'css/js-art.css'), 'utf8'), 'h1{}');
   assert.deepEqual(await (await fetch(base + '/__js-art/state')).json(), { v: 1 });
 
-  const big = await fetch(base + '/__js-art/save', { method: 'POST', body: 'x'.repeat(2 * 1024 * 1024 + 10) });
+  const big = await fetch(base + '/__js-art/save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: 'x'.repeat(2 * 1024 * 1024 + 10) });
   assert.equal(big.status, 413);
-  const bad = await fetch(base + '/__js-art/save', { method: 'POST', body: '{nope' });
+  const bad = await fetch(base + '/__js-art/save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{nope' });
   assert.equal(bad.status, 400);
+});
+
+test('server: only same-origin JSON writes from localhost are accepted', async t => {
+  const { tmp, root, server } = await setup();
+  t.after(async () => { server.close(); await fs.rm(tmp, { recursive: true, force: true }); });
+  const port = server.address().port;
+  const out = path.join(root, 'css/js-art.css');
+  const json = { 'Content-Type': 'application/json' };
+  const body = JSON.stringify({ css: '@import url(https://evil.example/x.css);', state: {} });
+
+  assert.equal(await raw(port, { method: 'POST', path: '/__js-art/save', headers: { ...json, Origin: 'https://evil.example' }, body }), 403);
+  assert.equal(await raw(port, { method: 'POST', path: '/__js-art/save', headers: { 'Content-Type': 'text/plain' }, body }), 415);
+  assert.equal(await raw(port, { method: 'POST', path: '/__js-art/save', headers: { ...json, Host: `evil.example:${port}` }, body }), 403);
+  assert.equal(await raw(port, { path: '/__js-art/state', headers: { Host: `evil.example:${port}` } }), 403);
+  assert.equal(await raw(port, { path: '/', headers: { Host: 'evil.example' } }), 403);
+  await assert.rejects(fs.access(out));
+
+  assert.equal(await raw(port, { method: 'POST', path: '/__js-art/save', headers: { ...json, Origin: `http://localhost:${port}`, Host: `localhost:${port}` }, body: JSON.stringify({ css: 'p{}', state: {} }) }), 200);
+  assert.equal(await raw(port, { path: '/', headers: { Host: `[::1]:${port}` } }), 200);
 });

@@ -48,3 +48,18 @@ test('"one" starts from body when no ancestor has an id', () => {
 test('special characters in classes are escaped', () => {
   assert.equal(selectorFor(mk('div', { cls: 'md:flex', parent: body }), 'all'), '.md\\:flex');
 });
+
+test('animation-hook class "reveal" is never used', () => {
+  assert.ok(STATE_CLASSES.includes('reveal'));
+  const head = mk('div', { cls: 'head', parent: body });
+  assert.equal(selectorFor(mk('h2', { cls: 'reveal', parent: head }), 'all'), '.head h2');
+});
+
+test('with page stats, a class used only on this tag (fewest matches) beats a site-wide utility class', () => {
+  const p = mk('p', { cls: 'mono hero-kicker reveal', parent: body });
+  const stats = c => ({ mono: { count: 30, sameTag: false }, 'hero-kicker': { count: 1, sameTag: true } })[c];
+  assert.equal(selectorFor(p, 'all', { stats }), '.hero-kicker');
+  const a = mk('a', { cls: 'btn btn-ink', parent: body });
+  const mixed = () => ({ count: 5, sameTag: false });
+  assert.equal(selectorFor(a, 'all', { stats: mixed }), '.btn');
+});

@@ -1,6 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { serialize, scaleValue, HEADER } from '../client/css-writer.js';
+import { serialize, scaleValue, mediaSelector, HEADER } from '../client/css-writer.js';
+
+test('weak edits are written without !important', () => {
+  assert.equal(serialize([{ selector: 'p', prop: 'font-size', value: 'calc(1em * 1.1)', weak: true }]), 'p {\n  font-size: calc(1em * 1.1);\n}\n');
+});
+
+test('mediaSelector keeps the active condition and excludes inactive theme conditions', () => {
+  assert.equal(mediaSelector(':root', [], []), ':root');
+  assert.equal(mediaSelector(':root', ['(prefers-color-scheme: dark)'], []), '@media (prefers-color-scheme: dark){:root}');
+  assert.equal(mediaSelector(':root', [], ['(prefers-color-scheme: dark)']), '@media (not (prefers-color-scheme: dark)){:root}');
+  assert.equal(mediaSelector(':root', ['(min-width: 1px)'], ['(prefers-color-scheme: dark)', '(prefers-contrast: more)']),
+    '@media (min-width: 1px) and (not (prefers-color-scheme: dark)) and (not (prefers-contrast: more)){:root}');
+  const css = serialize([{ selector: mediaSelector(':root', [], ['(prefers-color-scheme: dark)']), prop: '--bg', value: '#fff' }]);
+  assert.ok(css.startsWith('@media (not (prefers-color-scheme: dark)) {\n  :root {\n    --bg: #fff;'));
+});
 
 test('groups declarations by selector in first-seen order, !important except custom properties', () => {
   const css = serialize([

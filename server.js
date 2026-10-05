@@ -59,10 +59,30 @@ function readBody(req) {
   });
 }
 
+/* The server writes into the project, so it only talks to pages it served itself: the Host must be a loopback
+   name (blocks DNS rebinding), a present Origin must be that same host, and writes must be JSON (a cross-site
+   form or text/plain POST can't send that without a CORS preflight, which is never answered). */
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+function hostOk(host, port) {
+  const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(host || '');
+  return !!m && LOOPBACK.has(m[1].toLowerCase()) && (!m[2] || +m[2] === port);
+}
+
+function originOk(origin, port) {
+  if (!origin) return true;
+  try {
+    const u = new URL(origin);
+    return u.protocol === 'http:' && hostOk(u.host, port);
+  } catch { return false; }
+}
+
 export function createServer({ root, out = 'css/js-art.css', toolDir = TOOL_DIR, clientDir = path.join(toolDir, 'client') }) {
   root = path.resolve(root);
   return http.createServer(async (req, res) => {
     try {
+      const port = req.socket.localPort;
+      if (!hostOk(req.headers.host, port) || !originOk(req.headers.origin, port)) return send(res, 403, 'Forbidden');
       const url = new URL(req.url, 'http://x');
       /* raw path keeps encoded ../ visible to the guard */
       const rawPath = req.url.split('?')[0];
@@ -77,6 +97,7 @@ export function createServer({ root, out = 'css/js-art.css', toolDir = TOOL_DIR,
       }
       if (url.pathname === '/__js-art/save') {
         if (req.method !== 'POST') return send(res, 405, 'Method not allowed');
+        if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) { req.resume(); return send(res, 415, 'Content-Type must be application/json'); }
         let data;
         try { data = JSON.parse(await readBody(req)); }
         catch (e) { return e.status ? send(res, e.status, e.message) : json(res, 400, { ok: false, error: 'Invalid JSON' }); }

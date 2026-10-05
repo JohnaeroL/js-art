@@ -55,3 +55,13 @@ test('onChange fires on set, undo, redo, reset and load', () => {
   assert.equal(calls, 5);
   assert.equal(m.canUndo, true); /* reset pushed a step; load does not touch history */
 });
+
+test('weak flag is kept on the edit and survives undo/redo', () => {
+  const m = new Model(() => {});
+  m.begin(); m.set('p', 'font-size', 'calc(1em * 1.1)', 1.1, true);
+  assert.equal(m.get('p', 'font-size').weak, true);
+  m.set('h1', 'color', 'red');
+  assert.equal('weak' in m.get('h1', 'color'), false);
+  m.undo(); m.redo();
+  assert.equal(m.get('p', 'font-size').weak, true);
+});

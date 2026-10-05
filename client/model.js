@@ -14,11 +14,14 @@ export class Model {
   #snapshot() { return new Map([...this.#edits].map(([k, e]) => [k, { ...e }])); }
   #emit() { this.onChange(this.list()); }
 
-  set(selector, prop, value, ui) {
+  /* weak = written without !important (see css-writer) */
+  set(selector, prop, value, ui, weak = false) {
     const k = keyOf(selector, prop);
-    if (value == null) this.#edits.delete(k);
-    else if (this.#edits.has(k)) Object.assign(this.#edits.get(k), { value, ui });
-    else this.#edits.set(k, { selector, prop, value, ui });
+    if (value == null) { this.#edits.delete(k); this.#emit(); return; }
+    const e = { selector, prop, value, ui };
+    if (weak) e.weak = true;
+    /* replacing keeps the insertion order of an existing key */
+    this.#edits.set(k, e);
     this.#emit();
   }
 

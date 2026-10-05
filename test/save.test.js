@@ -10,7 +10,7 @@ const HTML = '<!doctype html>\n<html><head>\n<link rel="preload" href="f.woff2" 
 test('insertLink adds the marker link right after the last stylesheet, once', () => {
   const a = insertLink(HTML, 'css/js-art.css');
   assert.equal(a.changed, true);
-  assert.ok(a.html.includes('<link rel="stylesheet" href="css/style.css?v=1"><!-- js-art --><link rel="stylesheet" href="css/js-art.css">'));
+  assert.ok(a.html.includes('<link rel="stylesheet" href="css/style.css?v=1"><!-- js-art --><link rel="stylesheet" href="css/js-art.css" data-js-art>'));
   const b = insertLink(a.html, 'css/js-art.css');
   assert.equal(b.changed, false);
   assert.equal(b.html, a.html);
@@ -18,7 +18,7 @@ test('insertLink adds the marker link right after the last stylesheet, once', ()
 
 test('insertLink falls back to before </head>', () => {
   const { html } = insertLink('<html><head><title>x</title></head><body></body></html>', 'a.css');
-  assert.ok(html.includes('<!-- js-art --><link rel="stylesheet" href="a.css"></head>'));
+  assert.ok(html.includes('<!-- js-art --><link rel="stylesheet" href="a.css" data-js-art></head>'));
 });
 
 test('backupName is a zero-padded local timestamp', () => {
@@ -41,6 +41,7 @@ test('save writes css and state, backs up, and links html only once', async () =
   assert.deepEqual(r2.linked, []);
   assert.equal(await fs.readFile(r2.backup, 'utf8'), 'h1 {}\n');
   assert.equal(path.basename(r2.backup), '2026-01-01_00-00-02.css');
+  assert.deepEqual(JSON.parse(await fs.readFile(r2.backup.replace(/\.css$/, '.json'), 'utf8')), { v: 1 });
   const html = await fs.readFile(path.join(root, 'index.html'), 'utf8');
   assert.equal(html.split('<!-- js-art -->').length, 2);
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(toolDir, 'state.json'), 'utf8')), { v: 2 });
