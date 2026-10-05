@@ -82,3 +82,8 @@ node js-art/server.js
 ```bash
 cd js-art && node --test
 ```
+
+## Документы
+
+- [docs/design.md](docs/design.md) — спецификация
+- [docs/plan.md](docs/plan.md) — план реализации
