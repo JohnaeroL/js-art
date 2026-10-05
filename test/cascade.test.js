@@ -26,18 +26,20 @@ test('pickWinner: !important, then specificity, then source order', () => {
   assert.equal(pickWinner([]), null);
 });
 
-test('groupsFor: one group per declaring selector, scoped to the tag; inline skipped; undeclared → weak tag', () => {
+test('groupsFor: one group per declaring selector, scoped to the tag; inline skipped; undeclared → tag', () => {
   const groups = groupsFor('p', [
     { part: '.mono', value: '.75rem' },
     { part: '.hero-lead', value: 'clamp(1.1rem,1.7vw,1.4rem)' },
     { part: '.hero-lead', value: 'clamp(1.1rem,1.7vw,1.4rem)' },
-    { part: 'p', value: '1rem' },
+    { part: 'p', value: '1rem', important: true },
     { inline: true, value: '0' },
     null,
   ]);
+  /* tag:is(part) already outranks the declaring rule, so edits stay weak (inline styles and :hover still win);
+     only an !important original needs !important */
   assert.deepEqual(groups, [
-    { selector: 'p:is(.mono)', base: '.75rem', weak: false },
-    { selector: 'p:is(.hero-lead)', base: 'clamp(1.1rem,1.7vw,1.4rem)', weak: false },
+    { selector: 'p:is(.mono)', base: '.75rem', weak: true },
+    { selector: 'p:is(.hero-lead)', base: 'clamp(1.1rem,1.7vw,1.4rem)', weak: true },
     { selector: 'p', base: '1rem', weak: false },
   ]);
   assert.deepEqual(groupsFor('p', [null]), [{ selector: 'p', base: null, weak: true }]);

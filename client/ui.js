@@ -2,7 +2,8 @@
    styles and the panel's styles never touch. */
 import { toHex, formatColor, parseColor } from './color.js';
 import { selectorFor } from './selector.js';
-import { withOverridesDisabled } from './scan.js';
+import { withOverridesDisabled, classStats } from './scan.js';
+import { planApply, planReset, shortcut } from './actions.js';
 import { pageControls, blockControls } from './controls.js';
 import { startPicker } from './picker.js';
 
@@ -180,7 +181,8 @@ export function mountUI({ model, onSave }) {
     groupsOpen: store.get('groups', {}),
     mode: 'all',
     el: null,
-    locks: { padding: true, margin: true },
+    /* margin starts unlocked: locking would turn `margin: 0 auto` into px and un-centre the block */
+    locks: { padding: true, margin: false },
     rows: [],
     saved: JSON.stringify(model.list()),
     flash: null,
@@ -188,18 +190,16 @@ export function mountUI({ model, onSave }) {
   };
 
   /* ───── values ───── */
-  const same = (c, a, b) => (c.kind === 'color' ? formatColor(a) === formatColor(b) : Math.abs(a - b) < c.step / 2);
-  const current = r => { const e = model.get(r.c.selector, r.c.prop); return e && e.ui != null ? e.ui : r.orig; };
+  const editsOf = r => r.c.keys.map(k => model.get(k.selector, k.prop)).filter(Boolean);
+  const current = r => { const e = editsOf(r).find(x => x.ui != null); return e ? e.ui : r.orig; };
+  const run = plan => plan.forEach(p => model.set(...p));
 
   function apply(r, v) {
     const { c } = r;
-    model.set(c.selector, c.prop, same(c, v, r.orig) ? null : c.write(v), v);
-    if (c.lock && state.locks[c.lock]) {
-      for (const o of state.rows) {
-        if (o === r || o.c.lock !== c.lock || o.c.selector !== c.selector) continue;
-        model.set(o.c.selector, o.c.prop, same(o.c, v, o.orig) ? null : o.c.write(v), v);
-      }
-    }
+    const siblings = c.lock && state.locks[c.lock]
+      ? state.rows.filter(o => o !== r && o.c.lock === c.lock && o.c.keys[0].selector === c.keys[0].selector)
+      : [];
+    run(planApply(r, v, siblings));
   }
 
   /* one undo step per gesture: begin() on the first input event, the change event ends the gesture */
@@ -275,7 +275,7 @@ export function mountUI({ model, onSave }) {
       sync();
       return;
     }
-    const sel = state.el && selectorFor(state.el, state.mode);
+    const sel = state.el && selectorFor(state.el, state.mode, { stats: classStats });
     const groups = withOverridesDisabled(() => {
       const gs = state.scope === 'page' ? pageControls() : blockControls(state.el, sel);
       for (const g of gs) for (const c of g.controls) c.orig = c.read();
@@ -309,7 +309,7 @@ export function mountUI({ model, onSave }) {
       reset.type = 'button';
       reset.title = 'Сбросить раздел';
       reset.setAttribute('aria-label', 'Сбросить раздел «' + g.label + '»');
-      const keys = new Set(g.controls.map(c => c.key));
+      const keys = new Set(g.controls.flatMap(c => c.keys.map(k => k.selector + '|' + k.prop)));
       reset.addEventListener('click', e => { e.preventDefault(); model.reset(ed => keys.has(ed.selector + '|' + ed.prop)); });
       sum.append(reset);
       det.append(sum);
@@ -318,7 +318,7 @@ export function mountUI({ model, onSave }) {
         if (c.sub && c.sub !== sub) { sub = c.sub; det.append(Object.assign(h('div', 'sub'), { textContent: sub })); }
         const r = c.kind === 'color' ? colorRow(c, c.orig) : rangeRow(c, c.orig);
         r.group = sum.querySelector('.badge');
-        r.row.querySelector('.rst').addEventListener('click', () => { model.begin(); apply(r, r.orig); });
+        r.row.querySelector('.rst').addEventListener('click', () => { model.begin(); run(planReset(r)); });
         state.rows.push(r);
         det.append(r.row);
       }
@@ -331,7 +331,7 @@ export function mountUI({ model, onSave }) {
   function sync() {
     const counts = new Map();
     for (const r of state.rows) {
-      const mod = !!model.get(r.c.selector, r.c.prop);
+      const mod = editsOf(r).length > 0;
       r.row.classList.toggle('mod', mod);
       r.show(current(r));
       counts.set(r.group, (counts.get(r.group) || 0) + (mod ? 1 : 0));
@@ -366,7 +366,7 @@ export function mountUI({ model, onSave }) {
     box.hidden = false;
   }
 
-  function selector() { return state.el ? selectorFor(state.el, state.mode) : ''; }
+  function selector() { return state.el ? selectorFor(state.el, state.mode, { stats: classStats }) : ''; }
 
   function select(el) {
     if (!el || el === document.documentElement) return;
@@ -401,7 +401,7 @@ export function mountUI({ model, onSave }) {
     selbox.hidden = true;
     state.stopPick = startPicker({
       host,
-      onHover: el => drawBox(hl, el, selectorFor(el, state.mode)),
+      onHover: el => drawBox(hl, el, selectorFor(el, state.mode, { stats: classStats })),
       onPick: el => { endPick(); select(el); },
       onCancel: endPick,
     });
@@ -522,10 +522,9 @@ export function mountUI({ model, onSave }) {
   addEventListener('keydown', e => {
     if (!state.open || state.stopPick) return;
     if (editableOutside(e.target)) return;
-    const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
-    if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? model.redo() : model.undo(); }
-    else if (mod && k === 'y') { e.preventDefault(); model.redo(); }
-    else if (e.key === 'Escape') setOpen(false);
+    const cmd = shortcut(e);
+    if (cmd === 'undo' || cmd === 'redo') { e.preventDefault(); model[cmd](); }
+    else if (cmd === 'close') setOpen(false);
   });
   addEventListener('beforeunload', e => {
     if (JSON.stringify(model.list()) !== state.saved) { e.preventDefault(); e.returnValue = ''; }

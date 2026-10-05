@@ -60,9 +60,11 @@ export function pickWinner(cands) {
   return best;
 }
 
-/* items: per element of `tag`, its winning declaration {part, value}, {inline: true} or null (nothing declared).
-   Each declaring selector becomes `tag:is(part)` so the edit stays on this tag; inline values are left alone;
-   undeclared (inherited) values get one weak `tag` rule unless `tag` itself is a declaring selector. */
+/* items: per element of `tag`, its winning declaration {part, value, important}, {inline: true} or null (nothing declared).
+   Each declaring selector becomes `tag:is(part)` so the edit stays on this tag. That selector already outranks
+   the declaring rule, so the edit is weak (no !important) and inline styles and :hover rules keep working —
+   only an !important original needs !important. Undeclared (inherited) values get one weak `tag` rule unless
+   `tag` itself is a declaring selector. */
 export function groupsFor(tag, items) {
   const groups = new Map();
   let undeclared = false;
@@ -70,7 +72,7 @@ export function groupsFor(tag, items) {
     if (!it) { undeclared = true; continue; }
     if (it.inline) continue;
     const selector = it.part.trim().toLowerCase() === tag ? tag : `${tag}:is(${it.part})`;
-    if (!groups.has(selector)) groups.set(selector, { selector, base: it.value, weak: false });
+    if (!groups.has(selector)) groups.set(selector, { selector, base: it.value, weak: !it.important });
   }
   if (undeclared && !groups.has(tag)) groups.set(tag, { selector: tag, base: null, weak: true });
   return [...groups.values()];

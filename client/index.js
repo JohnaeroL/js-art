@@ -2,6 +2,7 @@
 import { Model } from './model.js';
 import { serialize } from './css-writer.js';
 import { mountUI } from './ui.js';
+import { saveOutcome } from './actions.js';
 
 const API = '/__js-art';
 
@@ -33,7 +34,7 @@ async function start() {
      resetting a control really returns to the site's own value */
   const state = await fetch(API + '/state').then(r => (r.ok ? r.json() : null)).catch(() => null);
   if (state && Array.isArray(state.edits)) {
-    document.querySelectorAll('link[href*="js-art.css"]').forEach(l => { if (l.sheet) l.sheet.disabled = true; else l.disabled = true; });
+    document.querySelectorAll('link[data-js-art], link[href*="js-art.css"]').forEach(l => { if (l.sheet) l.sheet.disabled = true; else l.disabled = true; });
     model.load(state.edits);
   }
 
@@ -42,23 +43,25 @@ async function start() {
     async onSave() {
       const edits = model.list();
       const css = serialize(edits, { header: true });
+      let res = null, out = null;
       try {
-        const res = await fetch(API + '/save', {
+        res = await fetch(API + '/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ css, state: { version: 1, edits } }),
         });
-        if (res.status === 404 || res.status === 405) throw new Error('no server');
-        const out = await res.json().catch(() => ({}));
-        if (!res.ok || !out.ok) return { ok: false, text: 'Ошибка сохранения: ' + (out.error || res.status) };
+        out = await res.json().catch(() => null);
+      } catch { /* network error: no server */ }
+      const outcome = saveOutcome(res ? res.status : 0, out);
+      if (outcome === 'error') return { ok: false, text: 'Ошибка сохранения: ' + (out.error || res.status) };
+      if (outcome === 'ok') {
         const name = out.file ? out.file.split(/[\\/]/).slice(-2).join('/') : 'js-art.css';
         return { ok: true, text: `Сохранено в ${name}` + (out.backup ? ' · бэкап в history/' : '') };
-      } catch {
-        /* opened without the JS-Art server: hand the CSS over instead */
-        try { await navigator.clipboard.writeText(css); } catch { /* clipboard blocked */ }
-        download('js-art.css', css);
-        return { ok: true, text: 'Сервер не найден — CSS скопирован и скачан' };
       }
+      /* opened without the JS-Art server (or on a plain static server): hand the CSS over instead */
+      try { await navigator.clipboard.writeText(css); } catch { /* clipboard blocked */ }
+      download('js-art.css', css);
+      return { ok: true, text: 'Сервер не найден — CSS скопирован и скачан' };
     },
   });
 }
