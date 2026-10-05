@@ -1,0 +1,10 @@
+{
+  "name": "js-art",
+  "private": true,
+  "type": "module",
+  "description": "Live style editor overlay for static sites",
+  "scripts": {
+    "start": "node server.js --root ../site",
+    "test": "node --test"
+  }
+}
