@@ -1,0 +1,544 @@
+/* The panel: a floating button that opens a small window of sliders. Lives in Shadow DOM so the site's
+   styles and the panel's styles never touch. */
+import { toHex, formatColor, parseColor } from './color.js';
+import { selectorFor } from './selector.js';
+import { withOverridesDisabled } from './scan.js';
+import { pageControls, blockControls } from './controls.js';
+import { startPicker } from './picker.js';
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('js-art:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('js-art:' + k, JSON.stringify(v)); } catch { /* storage blocked */ } },
+};
+
+const svg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICON = {
+  logo: svg('<path d="M4 6h9M19 6h1M4 12h3M13 12h7M4 18h11"/><circle cx="16" cy="6" r="2.5"/><circle cx="10" cy="12" r="2.5"/><circle cx="18" cy="18" r="2.5"/>'),
+  undo: svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
+  redo: svg('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>'),
+  close: svg('<path d="M5 12h14"/>'),
+  pick: svg('<circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>'),
+  up: svg('<path d="m6 15 6-6 6 6"/>'),
+  down: svg('<path d="m6 9 6 6 6-6"/>'),
+  reset: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'),
+  lock: svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'),
+  unlock: svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>'),
+};
+
+const CSS = `
+:host{all:initial;--bg:#fff;--bg2:#f2f2f5;--fg:#18181b;--mut:#71717a;--line:rgba(0,0,0,.09);--acc:#6d5efc;--acc-fg:#fff;--shadow:0 16px 48px -12px rgba(0,0,0,.3),0 0 0 1px rgba(0,0,0,.07)}
+@media (prefers-color-scheme:dark){:host{--bg:#1c1c20;--bg2:#2a2a30;--fg:#f4f4f5;--mut:#a1a1aa;--line:rgba(255,255,255,.09);--acc:#8b7fff;--acc-fg:#fff;--shadow:0 16px 48px -12px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.08)}}
+*{box-sizing:border-box;margin:0;font:inherit;color:inherit}
+.wrap{font:400 12.5px/1.4 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--fg);-webkit-font-smoothing:antialiased}
+button{background:none;border:0;padding:0;cursor:pointer}
+button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+svg{width:16px;height:16px;display:block}
+.fab{position:fixed;z-index:2147483647;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--acc);color:var(--acc-fg);box-shadow:var(--shadow);touch-action:none;transition:transform .2s}
+.fab:hover{transform:scale(1.06)}
+.fab svg{width:20px;height:20px}
+.fab.dirty::after{content:"";position:absolute;top:2px;right:2px;width:10px;height:10px;border-radius:50%;background:#ffb020;border:2px solid var(--bg)}
+.panel{position:fixed;z-index:2147483647;width:320px;display:flex;flex-direction:column;max-height:calc(100vh - 100px);background:var(--bg);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+.panel[hidden]{display:none}
+.top{display:flex;align-items:center;gap:6px;padding:8px 8px 8px 14px;border-bottom:1px solid var(--line)}
+.brand{flex:1;font-weight:700;font-size:13.5px;letter-spacing:-.02em}
+.brand i{font-style:normal;color:var(--acc)}
+.ib{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--mut)}
+.ib:hover:not(:disabled){background:var(--bg2);color:var(--fg)}
+.ib:disabled{opacity:.35;cursor:default}
+.seg{display:flex;gap:2px;padding:2px;border-radius:8px;background:var(--bg2)}
+.seg button{flex:1;height:26px;padding:0 8px;border-radius:6px;font-weight:500;color:var(--mut);white-space:nowrap}
+.seg button.on{background:var(--bg);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.scope{margin:10px 12px 4px}
+.blockbar{display:grid;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.blockbar[hidden]{display:none}
+.row{display:flex;align-items:center;gap:6px;min-width:0}
+.pick{display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:7px;background:var(--acc);color:var(--acc-fg);font-weight:600;white-space:nowrap}
+.pick.on{background:var(--fg);color:var(--bg)}
+.selname{flex:1;min-width:0;height:28px;line-height:28px;padding:0 8px;border-radius:7px;background:var(--bg2);font:11.5px/28px ui-monospace,SFMono-Regular,Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.count{color:var(--mut);font-size:11px;white-space:nowrap}
+.mode{flex:1}
+.body{flex:1;overflow:auto;overscroll-behavior:contain;padding:4px 0 8px}
+.hint{padding:16px 14px;color:var(--mut)}
+.hint b{color:var(--fg)}
+details{border-bottom:1px solid var(--line)}
+details:last-child{border-bottom:0}
+summary{display:flex;align-items:center;gap:8px;padding:10px 12px 10px 14px;font-weight:600;cursor:pointer;list-style:none;user-select:none}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"";width:6px;height:6px;border-right:1.5px solid var(--mut);border-bottom:1.5px solid var(--mut);transform:rotate(-45deg);transition:transform .2s;margin-right:2px}
+details[open]>summary::before{transform:rotate(45deg)}
+summary .lbl{flex:1}
+.badge{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--acc);color:var(--acc-fg);font-size:10.5px;line-height:18px;text-align:center}
+.badge:empty{display:none}
+summary .ib{width:24px;height:24px}
+summary .ib.on{color:var(--acc)}
+.sub{padding:8px 14px 2px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}
+.ctl{padding:5px 12px 5px 14px}
+.lab{display:flex;align-items:center;gap:6px;min-height:24px}
+.name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mut)}
+.ctl.mod .name{color:var(--fg);font-weight:500}
+.ctl.mod .name::before{content:"";display:inline-block;width:6px;height:6px;margin:0 6px 1px 0;border-radius:50%;background:var(--acc)}
+.num,.hex{height:24px;padding:0 6px;border:1px solid transparent;border-radius:6px;background:var(--bg2);font:11.5px ui-monospace,SFMono-Regular,Consolas,monospace;text-align:right}
+.num{width:66px}
+.hex{width:118px;text-align:left}
+.num:focus,.hex:focus{outline:none;border-color:var(--acc)}
+.num::-webkit-inner-spin-button{display:none}
+.num{-moz-appearance:textfield}
+.unit{width:14px;color:var(--mut);font-size:11px}
+.rst{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;color:var(--mut);visibility:hidden}
+.rst svg{width:13px;height:13px}
+.ctl.mod .rst{visibility:visible}
+.rst:hover{background:var(--bg2);color:var(--fg)}
+.sw{width:24px;height:24px;padding:0;border:0;border-radius:6px;background:none;cursor:pointer}
+.sw::-webkit-color-swatch-wrapper{padding:0}
+.sw::-webkit-color-swatch{border:1px solid var(--line);border-radius:6px}
+.sw::-moz-color-swatch{border:1px solid var(--line);border-radius:6px}
+.alpha{display:flex;align-items:center;gap:8px}
+.pct{width:34px;text-align:right;color:var(--mut);font:11px ui-monospace,SFMono-Regular,Consolas,monospace}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:20px;background:transparent;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:var(--bg2)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border-radius:50%;background:var(--acc);border:2px solid var(--bg);box-shadow:0 0 0 1px var(--acc)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:var(--bg2)}
+input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:var(--acc);border:2px solid var(--bg)}
+.alpha input[type=range]::-webkit-slider-runnable-track{background:linear-gradient(90deg,transparent,var(--swatch,#888)),repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 0 0/8px 8px}
+.foot{display:flex;align-items:center;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
+.status{flex:1;min-width:0;font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.status.err{color:#e5484d}.status.ok{color:#30a46c}
+.ghost{height:30px;padding:0 10px;border-radius:8px;border:1px solid var(--line);color:var(--mut);white-space:nowrap}
+.ghost:hover{color:var(--fg);border-color:var(--mut)}
+.primary{height:30px;padding:0 14px;border-radius:8px;background:var(--acc);color:var(--acc-fg);font-weight:600;white-space:nowrap}
+.primary:disabled{opacity:.6;cursor:default}
+.box{position:fixed;z-index:2147483646;pointer-events:none;border:2px solid var(--acc);background:color-mix(in srgb,var(--acc) 12%,transparent);border-radius:3px}
+.box.sel{border-style:dashed;background:none}
+.box[hidden]{display:none}
+.box span{position:absolute;left:-2px;bottom:100%;margin-bottom:4px;padding:2px 6px;border-radius:4px;background:var(--acc);color:var(--acc-fg);font:11px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:nowrap;max-width:80vw;overflow:hidden;text-overflow:ellipsis}
+.box.below span{bottom:auto;top:100%;margin:4px 0 0}
+@media (max-width:560px){
+  .panel{left:0!important;right:0!important;bottom:0!important;top:auto!important;width:auto;max-height:72vh!important;border-radius:16px 16px 0 0}
+  .wrap.open .fab{display:none}
+  .ctl{padding-block:7px}
+}
+`;
+
+const HTML = `
+<div class="wrap">
+  <div class="box" data-el="hl" hidden><span></span></div>
+  <div class="box sel" data-el="selbox" hidden><span></span></div>
+  <button class="fab" data-el="fab" type="button" aria-label="JS-Art: открыть панель" title="JS-Art">${ICON.logo}</button>
+  <section class="panel" data-el="panel" role="dialog" aria-label="JS-Art" hidden>
+    <header class="top">
+      <b class="brand">JS<i>-</i>Art</b>
+      <button class="ib" data-act="undo" type="button" title="Отменить (Ctrl+Z)" aria-label="Отменить">${ICON.undo}</button>
+      <button class="ib" data-act="redo" type="button" title="Повторить (Ctrl+Shift+Z)" aria-label="Повторить">${ICON.redo}</button>
+      <button class="ib" data-act="close" type="button" title="Свернуть (Esc)" aria-label="Свернуть">${ICON.close}</button>
+    </header>
+    <div class="seg scope" role="tablist" aria-label="Зона действия">
+      <button type="button" role="tab" data-scope="page">Страница</button>
+      <button type="button" role="tab" data-scope="block">Блок</button>
+    </div>
+    <div class="blockbar" data-el="blockbar" hidden>
+      <div class="row">
+        <button class="pick" data-act="pick" type="button">${ICON.pick}<span>Выбрать</span></button>
+        <code class="selname" data-el="selname">—</code>
+        <span class="count" data-el="count"></span>
+      </div>
+      <div class="row">
+        <button class="ib" data-act="up" type="button" title="Родительский элемент" aria-label="Родительский элемент">${ICON.up}</button>
+        <button class="ib" data-act="down" type="button" title="Дочерний элемент" aria-label="Дочерний элемент">${ICON.down}</button>
+        <div class="seg mode" role="group" aria-label="Охват">
+          <button type="button" data-mode="all" title="Все элементы с таким же селектором">Все такие</button>
+          <button type="button" data-mode="one" title="Только выбранный элемент">Только этот</button>
+        </div>
+      </div>
+    </div>
+    <div class="body" data-el="body"></div>
+    <footer class="foot">
+      <button class="ghost" data-act="resetall" type="button" title="Вернуть все исходные значения">Сбросить всё</button>
+      <span class="status" data-el="status" role="status" aria-live="polite"></span>
+      <button class="primary" data-act="save" type="button">Сохранить</button>
+    </footer>
+  </section>
+</div>`;
+
+const decimals = step => (step >= 1 ? 0 : Math.ceil(-Math.log10(step) - 1e-9));
+const fmt = (v, step) => String(Number(v.toFixed(decimals(step))));
+const h = (tag, cls, html = '') => Object.assign(document.createElement(tag), { className: cls, innerHTML: html });
+
+export function mountUI({ model, onSave }) {
+  const host = document.createElement('js-art-root');
+  const root = host.attachShadow({ mode: 'open' });
+  root.innerHTML = `<style>${CSS}</style>${HTML}`;
+  document.body.append(host);
+  const $ = name => root.querySelector(`[data-el="${name}"]`);
+  const wrap = root.querySelector('.wrap'), fab = $('fab'), panel = $('panel'), body = $('body');
+  const status = $('status'), hl = $('hl'), selbox = $('selbox');
+  const act = name => root.querySelector(`[data-act="${name}"]`);
+
+  const state = {
+    open: store.get('open', false),
+    scope: store.get('scope', 'page'),
+    pos: store.get('pos', { right: 20, bottom: 20 }),
+    groupsOpen: store.get('groups', {}),
+    mode: 'all',
+    el: null,
+    locks: { padding: true, margin: true },
+    rows: [],
+    saved: JSON.stringify(model.list()),
+    flash: null,
+    stopPick: null,
+  };
+
+  /* ───── values ───── */
+  const same = (c, a, b) => (c.kind === 'color' ? formatColor(a) === formatColor(b) : Math.abs(a - b) < c.step / 2);
+  const current = r => { const e = model.get(r.c.selector, r.c.prop); return e && e.ui != null ? e.ui : r.orig; };
+
+  function apply(r, v) {
+    const { c } = r;
+    model.set(c.selector, c.prop, same(c, v, r.orig) ? null : c.write(v), v);
+    if (c.lock && state.locks[c.lock]) {
+      for (const o of state.rows) {
+        if (o === r || o.c.lock !== c.lock || o.c.selector !== c.selector) continue;
+        model.set(o.c.selector, o.c.prop, same(o.c, v, o.orig) ? null : o.c.write(v), v);
+      }
+    }
+  }
+
+  /* one undo step per gesture: begin() on the first input event, the change event ends the gesture */
+  function gesture(r, input, read) {
+    input.addEventListener('input', () => {
+      if (!r.dragging) { model.begin(); r.dragging = true; }
+      apply(r, read());
+    });
+    input.addEventListener('change', () => { r.dragging = false; });
+  }
+
+  /* ───── rows ───── */
+  function rangeRow(c, orig) {
+    const row = h('div', 'ctl', `<div class="lab"><span class="name"></span><input class="num" type="number" inputmode="decimal"><span class="unit"></span><button class="rst" type="button" title="Вернуть исходное (${fmt(orig, c.step)}${c.unit === '×' ? '×' : c.unit})">${ICON.reset}</button></div><input type="range">`);
+    row.querySelector('.name').textContent = c.label;
+    row.querySelector('.unit').textContent = c.unit;
+    const range = row.querySelector('input[type=range]'), num = row.querySelector('.num');
+    Object.assign(range, { min: Math.min(c.min, orig), max: Math.max(c.max, orig), step: c.step });
+    num.step = c.step;
+    range.setAttribute('aria-label', (c.sub ? c.sub + ' — ' : '') + c.label);
+    num.setAttribute('aria-label', range.getAttribute('aria-label'));
+    const r = { c, orig, row };
+    gesture(r, range, () => +range.value);
+    num.addEventListener('change', () => {
+      const v = parseFloat(num.value.replace(',', '.'));
+      if (isNaN(v)) return r.show(current(r));
+      model.begin(); apply(r, v);
+    });
+    r.show = v => {
+      range.value = v;
+      if (root.activeElement !== num) num.value = fmt(v, c.step);
+    };
+    return r;
+  }
+
+  function colorRow(c, orig) {
+    const row = h('div', 'ctl color', `<div class="lab"><span class="name"></span><input class="sw" type="color"><input class="hex" spellcheck="false" autocomplete="off"><button class="rst" type="button" title="Вернуть исходное (${formatColor(orig)})">${ICON.reset}</button></div><div class="alpha"><input type="range" min="0" max="1" step="0.01"><span class="pct"></span></div>`);
+    row.querySelector('.name').textContent = c.label;
+    row.querySelector('.name').title = c.label;
+    const sw = row.querySelector('.sw'), hex = row.querySelector('.hex'), alpha = row.querySelector('input[type=range]'), pct = row.querySelector('.pct');
+    const label = (c.sub ? c.sub + ' — ' : '') + c.label;
+    sw.setAttribute('aria-label', label + ': цвет');
+    hex.setAttribute('aria-label', label + ': значение');
+    alpha.setAttribute('aria-label', label + ': прозрачность');
+    const r = { c, orig, row };
+    gesture(r, sw, () => {
+      const cur = current(r), p = parseColor(sw.value);
+      return { ...p, a: cur.a === 0 ? 1 : cur.a }; /* picking a colour for a transparent background makes it visible */
+    });
+    gesture(r, alpha, () => ({ ...current(r), a: +alpha.value }));
+    hex.addEventListener('change', () => {
+      const p = parseColor(hex.value);
+      if (!p) return r.show(current(r));
+      model.begin(); apply(r, p);
+    });
+    r.show = v => {
+      sw.value = toHex(v);
+      if (root.activeElement !== hex) hex.value = formatColor(v);
+      alpha.value = v.a;
+      alpha.style.setProperty('--swatch', toHex(v));
+      pct.textContent = Math.round(v.a * 100) + '%';
+    };
+    return r;
+  }
+
+  /* ───── render ───── */
+  function render() {
+    state.rows = [];
+    body.textContent = '';
+    if (!state.open) return;
+    if (state.scope === 'block' && !state.el) {
+      body.innerHTML = '<p class="hint">Нажмите <b>Выбрать</b> и кликните по элементу на сайте — правки применятся к нему и всем таким же блокам. Esc отменяет выбор.</p>';
+      sync();
+      return;
+    }
+    const sel = state.el && selectorFor(state.el, state.mode);
+    const groups = withOverridesDisabled(() => {
+      const gs = state.scope === 'page' ? pageControls() : blockControls(state.el, sel);
+      for (const g of gs) for (const c of g.controls) c.orig = c.read();
+      return gs;
+    });
+    const openMap = state.groupsOpen[state.scope] || {};
+    groups.forEach((g, i) => {
+      const det = h('details', 'grp');
+      det.open = openMap[g.id] ?? i === 0;
+      det.addEventListener('toggle', () => {
+        (state.groupsOpen[state.scope] ||= {})[g.id] = det.open;
+        store.set('groups', state.groupsOpen);
+      });
+      const sum = h('summary', '', `<span class="lbl"></span><span class="badge"></span>`);
+      sum.querySelector('.lbl').textContent = g.label;
+      if (g.lock) {
+        const lock = h('button', 'ib' + (state.locks[g.lock] ? ' on' : ''), state.locks[g.lock] ? ICON.lock : ICON.unlock);
+        lock.type = 'button';
+        lock.title = 'Все стороны вместе';
+        lock.setAttribute('aria-pressed', state.locks[g.lock]);
+        lock.addEventListener('click', e => {
+          e.preventDefault();
+          state.locks[g.lock] = !state.locks[g.lock];
+          lock.classList.toggle('on', state.locks[g.lock]);
+          lock.innerHTML = state.locks[g.lock] ? ICON.lock : ICON.unlock;
+          lock.setAttribute('aria-pressed', state.locks[g.lock]);
+        });
+        sum.append(lock);
+      }
+      const reset = h('button', 'ib', ICON.reset);
+      reset.type = 'button';
+      reset.title = 'Сбросить раздел';
+      reset.setAttribute('aria-label', 'Сбросить раздел «' + g.label + '»');
+      const keys = new Set(g.controls.map(c => c.key));
+      reset.addEventListener('click', e => { e.preventDefault(); model.reset(ed => keys.has(ed.selector + '|' + ed.prop)); });
+      sum.append(reset);
+      det.append(sum);
+      let sub;
+      for (const c of g.controls) {
+        if (c.sub && c.sub !== sub) { sub = c.sub; det.append(Object.assign(h('div', 'sub'), { textContent: sub })); }
+        const r = c.kind === 'color' ? colorRow(c, c.orig) : rangeRow(c, c.orig);
+        r.group = sum.querySelector('.badge');
+        r.row.querySelector('.rst').addEventListener('click', () => { model.begin(); apply(r, r.orig); });
+        state.rows.push(r);
+        det.append(r.row);
+      }
+      body.append(det);
+    });
+    sync();
+  }
+
+  /* refresh every control from the model (after edits, undo/redo, load) */
+  function sync() {
+    const counts = new Map();
+    for (const r of state.rows) {
+      const mod = !!model.get(r.c.selector, r.c.prop);
+      r.row.classList.toggle('mod', mod);
+      r.show(current(r));
+      counts.set(r.group, (counts.get(r.group) || 0) + (mod ? 1 : 0));
+    }
+    counts.forEach((n, badge) => { badge.textContent = n || ''; });
+    act('undo').disabled = !model.canUndo;
+    act('redo').disabled = !model.canRedo;
+    const dirty = JSON.stringify(model.list()) !== state.saved;
+    fab.classList.toggle('dirty', dirty);
+    if (!state.flash) {
+      status.className = 'status';
+      const n = model.list().length;
+      status.textContent = dirty ? 'Есть несохранённые изменения' : n ? `Сохранено · правок: ${n}` : 'Исходный вид';
+    }
+  }
+
+  function say(text, kind) {
+    clearTimeout(state.flash);
+    status.className = 'status ' + (kind || '');
+    status.textContent = text;
+    status.title = text;
+    state.flash = setTimeout(() => { state.flash = null; sync(); }, 4000);
+  }
+
+  /* ───── block selection ───── */
+  function drawBox(box, el, label) {
+    if (!el || !el.isConnected) { box.hidden = true; return; }
+    const r = el.getBoundingClientRect();
+    Object.assign(box.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+    box.classList.toggle('below', r.top < 26);
+    box.querySelector('span').textContent = label;
+    box.hidden = false;
+  }
+
+  function selector() { return state.el ? selectorFor(state.el, state.mode) : ''; }
+
+  function select(el) {
+    if (!el || el === document.documentElement) return;
+    state.el = el;
+    const sel = selector();
+    $('selname').textContent = sel;
+    $('selname').title = sel;
+    let n = 0;
+    try { n = document.querySelectorAll(sel).length; } catch { /* exotic selector */ }
+    $('count').textContent = n > 1 ? `× ${n}` : '';
+    render();
+    /* the element is still under the cursor right after the click: re-read originals once :hover is gone */
+    if (el.matches(':hover')) el.addEventListener('pointerleave', () => { if (state.el === el) render(); }, { once: true });
+    loop();
+  }
+
+  let raf = 0;
+  function loop() {
+    cancelAnimationFrame(raf);
+    const active = state.open && state.scope === 'block' && state.el && !state.stopPick;
+    if (!active) { selbox.hidden = true; return; }
+    drawBox(selbox, state.el, selector());
+    raf = requestAnimationFrame(loop);
+  }
+
+  function pick() {
+    if (state.stopPick) { state.stopPick(); endPick(); return; }
+    act('pick').classList.add('on');
+    act('pick').querySelector('span').textContent = 'Отмена';
+    const narrow = matchMedia('(max-width:560px)').matches;
+    if (narrow) panel.hidden = true;
+    selbox.hidden = true;
+    state.stopPick = startPicker({
+      host,
+      onHover: el => drawBox(hl, el, selectorFor(el, state.mode)),
+      onPick: el => { endPick(); select(el); },
+      onCancel: endPick,
+    });
+  }
+  function endPick() {
+    state.stopPick = null;
+    hl.hidden = true;
+    act('pick').classList.remove('on');
+    act('pick').querySelector('span').textContent = 'Выбрать';
+    panel.hidden = !state.open;
+    loop();
+  }
+
+  /* ───── layout: draggable button, panel next to it ───── */
+  function placeFab() {
+    const max = (v, lim) => Math.min(Math.max(8, v), lim - 52);
+    state.pos = { right: max(state.pos.right, innerWidth), bottom: max(state.pos.bottom, innerHeight) };
+    fab.style.right = state.pos.right + 'px';
+    fab.style.bottom = state.pos.bottom + 'px';
+    placePanel();
+  }
+  function placePanel() {
+    const s = panel.style;
+    if (matchMedia('(max-width:560px)').matches) { s.left = s.right = s.top = s.bottom = s.maxHeight = ''; return; }
+    const r = fab.getBoundingClientRect(), gap = 10;
+    if (r.left + r.width / 2 > innerWidth / 2) { s.right = innerWidth - r.right + 'px'; s.left = 'auto'; }
+    else { s.left = r.left + 'px'; s.right = 'auto'; }
+    if (r.top + r.height / 2 > innerHeight / 2) {
+      s.bottom = innerHeight - r.top + gap + 'px'; s.top = 'auto'; s.maxHeight = r.top - gap - 12 + 'px';
+    } else {
+      s.top = r.bottom + gap + 'px'; s.bottom = 'auto'; s.maxHeight = innerHeight - r.bottom - gap - 12 + 'px';
+    }
+  }
+
+  function setOpen(open) {
+    state.open = open;
+    store.set('open', open);
+    panel.hidden = !open;
+    wrap.classList.toggle('open', open);
+    fab.setAttribute('aria-expanded', open);
+    fab.setAttribute('aria-label', open ? 'JS-Art: свернуть панель' : 'JS-Art: открыть панель');
+    if (open) { placePanel(); render(); }
+    loop();
+  }
+
+  let drag = null;
+  fab.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    fab.setPointerCapture(e.pointerId);
+    const r = fab.getBoundingClientRect();
+    drag = { x: e.clientX, y: e.clientY, dx: r.right - e.clientX, dy: r.bottom - e.clientY, moved: false };
+  });
+  fab.addEventListener('pointermove', e => {
+    if (!drag) return;
+    if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 5) return;
+    drag.moved = true;
+    state.pos = { right: innerWidth - e.clientX - drag.dx, bottom: innerHeight - e.clientY - drag.dy };
+    placeFab();
+  });
+  fab.addEventListener('pointerup', () => {
+    if (!drag) return;
+    const moved = drag.moved;
+    drag = null;
+    if (moved) store.set('pos', state.pos); else setOpen(!state.open);
+  });
+  fab.addEventListener('pointercancel', () => { drag = null; });
+  fab.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(!state.open); } });
+  addEventListener('resize', placeFab);
+
+  /* ───── header & footer ───── */
+  function setScope(scope) {
+    state.scope = scope;
+    store.set('scope', scope);
+    root.querySelectorAll('[data-scope]').forEach(b => {
+      b.classList.toggle('on', b.dataset.scope === scope);
+      b.setAttribute('aria-selected', b.dataset.scope === scope);
+    });
+    $('blockbar').hidden = scope !== 'block';
+    render();
+    loop();
+  }
+  root.querySelectorAll('[data-scope]').forEach(b => b.addEventListener('click', () => setScope(b.dataset.scope)));
+  root.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
+    state.mode = b.dataset.mode;
+    root.querySelectorAll('[data-mode]').forEach(x => x.classList.toggle('on', x === b));
+    if (state.el) select(state.el);
+  }));
+  root.querySelector('[data-mode="all"]').classList.add('on');
+
+  act('close').addEventListener('click', () => setOpen(false));
+  act('undo').addEventListener('click', () => model.undo());
+  act('redo').addEventListener('click', () => model.redo());
+  act('pick').addEventListener('click', pick);
+  act('up').addEventListener('click', () => {
+    const p = state.el && state.el.parentElement;
+    if (p && p !== document.documentElement) select(p);
+  });
+  act('down').addEventListener('click', () => {
+    const c = state.el && [...state.el.children].find(x => x.localName !== 'js-art-root' && x.localName !== 'script' && x.localName !== 'style');
+    if (c) select(c);
+  });
+  act('resetall').addEventListener('click', () => { if (model.list().length) { model.reset(); say('Всё сброшено к исходному — Ctrl+Z вернёт'); } });
+  act('save').addEventListener('click', async () => {
+    const btn = act('save');
+    btn.disabled = true;
+    say('Сохранение…');
+    try {
+      const res = await onSave();
+      if (res.ok) { state.saved = JSON.stringify(model.list()); sync(); }
+      say(res.text, res.ok ? 'ok' : 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  /* ───── keyboard ───── */
+  const editableOutside = t => t !== host && t instanceof Element && (t.isContentEditable || /^(input|textarea|select)$/.test(t.localName));
+  addEventListener('keydown', e => {
+    if (!state.open || state.stopPick) return;
+    if (editableOutside(e.target)) return;
+    const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+    if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? model.redo() : model.undo(); }
+    else if (mod && k === 'y') { e.preventDefault(); model.redo(); }
+    else if (e.key === 'Escape') setOpen(false);
+  });
+  addEventListener('beforeunload', e => {
+    if (JSON.stringify(model.list()) !== state.saved) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  /* theme switches change the palette's originals */
+  const rerenderPage = () => { if (state.open && state.scope === 'page') render(); };
+  new MutationObserver(rerenderPage).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', rerenderPage);
+
+  placeFab();
+  setScope(state.scope);
+  setOpen(state.open);
+
+  return { sync };
+}
