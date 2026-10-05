@@ -5,7 +5,7 @@
 /* toggled by scripts, so a selector built on them would stop matching */
 export const STATE_CLASSES = ['in', 'on', 'active', 'scrolled', 'play', 'held', 'sent', 'menu-open', 'open', 'is-active'];
 
-const esc = s => s.replace(/([^\w-])/g, '\$1');
+const esc = s => s.replace(/([^\w-])/g, '\\$1');
 const tag = el => el.tagName.toLowerCase();
 const classes = el => [...el.classList].filter(c => !STATE_CLASSES.includes(c) && !c.startsWith('js-art'));
 

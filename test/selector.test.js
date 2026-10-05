@@ -46,5 +46,5 @@ test('"one" starts from body when no ancestor has an id', () => {
 });
 
 test('special characters in classes are escaped', () => {
-  assert.equal(selectorFor(mk('div', { cls: 'md:flex', parent: body }), 'all'), '.md\:flex');
+  assert.equal(selectorFor(mk('div', { cls: 'md:flex', parent: body }), 'all'), '.md\\:flex');
 });
