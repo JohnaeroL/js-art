@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /* JS-Art dev server: serves the site, injects the panel into HTML responses, saves results into the project.
-   Usage: node js-art/server.js [--root site] [--port 5173] [--out css/js-art.css] */
+   Usage: node js-art/server.js [--root site] [--port 5173] [--out css/js-art.css] [--open [/page.html]] */
 import http from 'node:http';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -130,18 +131,35 @@ export function createServer({ root, out = 'css/js-art.css', toolDir = TOOL_DIR,
   });
 }
 
-function args(argv) {
-  const o = { root: 'site', port: 5173, out: 'css/js-art.css' };
+/* --open opens the browser on the site once the server is up; an optional path picks the page (--open /about.html) */
+export function args(argv) {
+  const o = { root: 'site', port: 5173, out: 'css/js-art.css', open: null };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i].replace(/^--/, '');
-    if (k in o) o[k] = k === 'port' ? +argv[++i] : argv[++i];
+    if (k === 'open') o.open = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[++i] : '/';
+    else if (k in o) o[k] = k === 'port' ? +argv[++i] : argv[++i];
   }
   return o;
 }
 
+function openBrowser(url) {
+  const [cmd, ...a] = process.platform === 'win32' ? ['cmd', '/c', 'start', '""', url]
+    : process.platform === 'darwin' ? ['open', url] : ['xdg-open', url];
+  spawn(cmd, a, { stdio: 'ignore', detached: true, windowsVerbatimArguments: true }).on('error', () => {}).unref();
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const o = args(process.argv.slice(2));
-  createServer(o).listen(o.port, '127.0.0.1', () => {
+  const page = `http://localhost:${o.port}${o.open && o.open.startsWith('/') ? o.open : '/' + (o.open || '')}`;
+  const server = createServer(o);
+  server.on('error', e => {
+    if (e.code !== 'EADDRINUSE') throw e;
+    console.error(`Порт ${o.port} уже занят — вероятно, JS-Art уже запущен.`);
+    if (o.open) openBrowser(page);
+    process.exitCode = 1;
+  });
+  server.listen(o.port, '127.0.0.1', () => {
     console.log(`JS-Art: http://localhost:${o.port}  (root: ${path.resolve(o.root)}, save → ${o.out})`);
+    if (o.open) openBrowser(page);
   });
 }
