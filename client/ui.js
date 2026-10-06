@@ -548,7 +548,20 @@ export function mountUI({ model, onSave }) {
   header.addEventListener('pointerup', endPanelDrag);
   header.addEventListener('pointercancel', endPanelDrag);
 
+  /* collapsing: the button appears where the panel was, in the panel's corner nearest the screen edge
+     (the mirror of how the panel opens next to the button) */
+  function fabToPanel() {
+    const r = panel.getBoundingClientRect();
+    if (!r.width || sheet()) return;
+    const right = r.left + r.width / 2 > innerWidth / 2 ? r.right : r.left + 44;
+    const bottom = r.top + r.height / 2 > innerHeight / 2 ? r.bottom : r.top + 44;
+    state.pos = { right: innerWidth - right, bottom: innerHeight - bottom };
+    store.set('pos', state.pos);
+    placeFab();
+  }
+
   function setOpen(open) {
+    if (!open && state.open) fabToPanel();
     state.open = open;
     store.set('open', open);
     panel.hidden = !open;
@@ -577,7 +590,12 @@ export function mountUI({ model, onSave }) {
     if (!drag) return;
     const moved = drag.moved;
     drag = null;
-    if (moved) store.set('pos', state.pos); else setOpen(!state.open);
+    if (moved) {
+      store.set('pos', state.pos);
+      /* the button was moved on purpose: the panel opens next to it again */
+      state.panelPos = null;
+      store.set('panelPos', null);
+    } else setOpen(!state.open);
   });
   fab.addEventListener('pointercancel', () => { drag = null; });
   fab.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(!state.open); } });
