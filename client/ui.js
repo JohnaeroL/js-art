@@ -14,7 +14,7 @@ const store = {
 
 const svg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const ICON = {
-  logo: svg('<path d="M4 6h9M19 6h1M4 12h3M13 12h7M4 18h11"/><circle cx="16" cy="6" r="2.5"/><circle cx="10" cy="12" r="2.5"/><circle cx="18" cy="18" r="2.5"/>'),
+  logo: svg('<path d="M8 4h-.5C6 4 5 5 5 6.5v3C5 11 4 12 3 12c1 0 2 1 2 2.5v3C5 19 6 20 7.5 20H8M16 4h.5C18 4 19 5 19 6.5v3c0 1.5 1 2.5 2 2.5-1 0-2 1-2 2.5v3c0 1.5-1 2.5-2.5 2.5H16"/><path d="M12 8c1.8 2.3 2.8 3.8 2.8 5.3a2.8 2.8 0 0 1-5.6 0c0-1.5 1-3 2.8-5.3z" fill="currentColor" stroke="none"/>'),
   undo: svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
   redo: svg('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>'),
   close: svg('<path d="M5 12h14"/>'),
