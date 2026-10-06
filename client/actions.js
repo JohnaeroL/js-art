@@ -4,7 +4,11 @@
    Plans are lists of [selector, prop, value|null, ui, weak] for Model.set. */
 import { formatColor } from './color.js';
 
-export const same = (c, a, b) => (c.kind === 'color' ? formatColor(a) === formatColor(b) : Math.abs(a - b) < c.step / 2);
+export const same = (c, a, b) => {
+  if (c.kind === 'color') return formatColor(a) === formatColor(b);
+  if (c.kind === 'select') return a === b;
+  return Math.abs(a - b) < c.step / 2;
+};
 
 function planSet(c, v, orig) {
   if (same(c, v, orig)) return c.keys.map(k => [k.selector, k.prop, null, v, false]);

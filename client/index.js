@@ -3,6 +3,7 @@ import { Model } from './model.js';
 import { serialize } from './css-writer.js';
 import { mountUI } from './ui.js';
 import { saveOutcome } from './actions.js';
+import { googleUrl, usedFonts } from './fonts.js';
 
 const API = '/__js-art';
 
@@ -16,6 +17,20 @@ function download(name, text) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+/* Google Fonts stylesheets of the picked fonts, one <link> per family, added once */
+const fontLinks = new Set();
+function loadFonts(edits) {
+  for (const name of usedFonts(edits)) {
+    if (fontLinks.has(name)) continue;
+    fontLinks.add(name);
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = googleUrl([name]);
+    link.dataset.jsArtFont = name;
+    document.head.append(link);
+  }
+}
+
 async function start() {
   if (window.__jsArt) return;
   window.__jsArt = true;
@@ -26,6 +41,7 @@ async function start() {
 
   let ui = null;
   const model = new Model(edits => {
+    loadFonts(edits);
     live.textContent = serialize(edits);
     if (ui) ui.sync();
   });
@@ -42,7 +58,7 @@ async function start() {
     model,
     async onSave() {
       const edits = model.list();
-      const css = serialize(edits, { header: true });
+      const css = serialize(edits, { header: true, imports: true });
       let res = null, out = null;
       try {
         res = await fetch(API + '/save', {

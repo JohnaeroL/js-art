@@ -7,6 +7,7 @@ import { parseColor, formatColor } from './color.js';
 import { scaleValue, mediaSelector } from './css-writer.js';
 import { declaredValue, winningDeclaration, rootColorVars, topBackgrounds } from './scan.js';
 import { groupsFor, scaledEdits, offsetEdits, factorEdits } from './cascade.js';
+import { FONTS, fontOf, firstFamily, fontStack } from './fonts.js';
 
 const cs = el => getComputedStyle(el);
 const num = s => parseFloat(s) || 0;
@@ -35,6 +36,32 @@ function scale({ label, sub, selector, prop, el }) {
     read: () => { const d = declaredValue(el, prop); base = usable(d) ? d : cs(el).getPropertyValue(prop); return 1; },
     write: k => scaleValue(base, k),
   });
+}
+
+/* kind 'select': options(orig) → [{value, label}]; the first one must be orig itself ("as on the site") */
+const select = o => single({ kind: 'select', write: v => v, ...o });
+
+const CASES = [['none', 'Как есть'], ['uppercase', 'ПРОПИСНЫЕ'], ['lowercase', 'строчные'], ['capitalize', 'Каждое Слово']];
+const fixed = list => orig => [...list.filter(([v]) => v === orig), ...list.filter(([v]) => v !== orig)].map(([value, label]) => ({ value, label }));
+
+/* font family, weight, italic, case of one element — every row writes to `selector` */
+function fontControls({ selector, el, sub, textCase = true }) {
+  let site = '';
+  const family = select({
+    label: 'Шрифт', sub, selector, prop: 'font-family', write: fontStack,
+    read: () => { site = firstFamily(cs(el).fontFamily); return (fontOf(site) || {}).name || ''; },
+    options: orig => [{ value: orig, label: site ? `Как на сайте (${site})` : 'Как на сайте' },
+      ...FONTS.filter(f => f.name !== orig).map(f => ({ value: f.name, label: f.name }))],
+  });
+  const weight = single({ label: 'Насыщенность', sub, selector, prop: 'font-weight', min: 100, max: 900, step: 100,
+    read: () => num(cs(el).fontWeight) || 400, write: v => String(v) });
+  const italic = select({ label: 'Курсив', sub, selector, prop: 'font-style',
+    read: () => (/italic|oblique/.test(cs(el).fontStyle) ? 'italic' : 'normal'),
+    options: fixed([['normal', 'Обычный'], ['italic', 'Курсив']]) });
+  const caps = select({ label: 'Регистр', sub, selector, prop: 'text-transform',
+    read: () => (CASES.some(([v]) => v === cs(el).textTransform) ? cs(el).textTransform : 'none'),
+    options: fixed(CASES) });
+  return textCase ? [family, weight, italic, caps] : [family, weight, italic];
 }
 
 const px = (o, read) => single({ unit: 'px', min: 0, max: 200, step: 1, ...o, read, write: v => `${v}px` });
@@ -94,6 +121,14 @@ export function pageControls() {
   const tags = Object.keys(TEXT_TAGS).filter(first);
   groups.push({ id: 'text', label: 'Цвета текста', controls: tags.map(t => color({ label: TEXT_TAGS[t], selector: t, prop: 'color', el: first(t) })) });
 
+  const HEADINGS = 'h1, h2, h3, h4, h5, h6, :is(h1, h2, h3, h4, h5, h6) :is(a, span, em, strong, b, i, small)';
+  const BODY = 'body, p, li, a, button, input, textarea, select, label, td, th, blockquote, figcaption, small';
+  const heading = first('h1, h2, h3, h4, h5, h6');
+  groups.push({ id: 'font', label: 'Шрифт и начертание', controls: [
+    ...(heading ? fontControls({ selector: HEADINGS, el: heading, sub: 'Заголовки' }) : []),
+    ...fontControls({ selector: BODY, el: first('p') || document.body, sub: 'Основной текст', textCase: false }),
+  ] });
+
   const typo = [scale({ label: 'Базовый размер', selector: 'html', prop: 'font-size', el: html })];
   for (const t of tags.filter(t => /^(h\d|p)$/.test(t))) {
     const sub = TEXT_TAGS[t];
@@ -133,6 +168,7 @@ export function blockControls(el, selector) {
     color({ label: 'Фон', selector, prop: 'background-color', el }),
     color({ label: 'Текст', selector, prop: 'color', el }),
   ] });
+  groups.push({ id: 'font', label: 'Шрифт и начертание', controls: fontControls({ selector, el }) });
   groups.push({ id: 'type', label: 'Типографика', controls: [
     scale({ label: 'Размер текста', selector, prop: 'font-size', el }),
     single({ label: 'Межбуквенный', selector, prop: 'letter-spacing', min: -0.1, max: 0.3, step: 0.005, unit: 'em', read: () => lsRatio(el), write: v => `${v}em` }),
