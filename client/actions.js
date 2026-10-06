@@ -6,7 +6,7 @@ import { formatColor } from './color.js';
 
 export const same = (c, a, b) => {
   if (c.kind === 'color') return formatColor(a) === formatColor(b);
-  if (c.kind === 'select') return a === b;
+  if (c.kind === 'select' || c.kind === 'text') return a === b;
   return Math.abs(a - b) < c.step / 2;
 };
 

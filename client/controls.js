@@ -7,6 +7,8 @@ import { parseColor, formatColor } from './color.js';
 import { scaleValue, mediaSelector } from './css-writer.js';
 import { declaredValue, winningDeclaration, rootColorVars, topBackgrounds } from './scan.js';
 import { groupsFor, scaledEdits, offsetEdits, factorEdits } from './cascade.js';
+import { selectorFor } from './selector.js';
+import { isLeaf, originalText } from './texts.js';
 import { FONTS, fontOf, firstFamily, fontStack } from './fonts.js';
 
 const cs = el => getComputedStyle(el);
@@ -43,6 +45,16 @@ const select = o => single({ kind: 'select', write: v => v, ...o });
 
 const CASES = [['none', 'Как есть'], ['uppercase', 'ПРОПИСНЫЕ'], ['lowercase', 'строчные'], ['capitalize', 'Каждое Слово']];
 const fixed = list => orig => [...list.filter(([v]) => v === orig), ...list.filter(([v]) => v !== orig)].map(([value, label]) => ({ value, label }));
+
+/* the element's own text (kind 'text'): one edit per element, so the selector is its exact path */
+function textControl(el) {
+  let from = '';
+  return single({
+    label: 'Текст', kind: 'text', selector: selectorFor(el, 'one'), prop: '@text',
+    read: () => { from = originalText(el).trim(); return from; },
+    write: to => ({ from, to }),
+  });
+}
 
 /* font family, weight, italic, case of one element — every row writes to `selector` */
 function fontControls({ selector, el, sub, textCase = true }) {
@@ -179,6 +191,7 @@ export function blockControls(el, selector) {
     pos.push(single({ label: 'Порядок (order)', selector, prop: 'order', min: -10, max: 10, step: 1, read: () => parseInt(cs(el).order, 10) || 0, write: v => String(v) }));
   }
   groups.push({ id: 'pos', label: 'Положение', controls: pos });
+  if (isLeaf(el)) groups.unshift({ id: 'text', label: 'Текст', controls: [textControl(el)] });
   groups.push({ id: 'colors', label: 'Цвета', controls: [
     color({ label: 'Фон', selector, prop: 'background-color', el }),
     color({ label: 'Текст', selector, prop: 'color', el }),

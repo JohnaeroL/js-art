@@ -90,6 +90,8 @@ summary .ib.on{color:var(--acc)}
 .num,.hex{height:24px;padding:0 6px;border:1px solid transparent;border-radius:6px;background:var(--bg2);font:11.5px ui-monospace,SFMono-Regular,Consolas,monospace;text-align:right}
 .num{width:66px}
 .hex{width:118px;text-align:left}
+.txt{display:block;width:100%;min-height:64px;margin-top:4px;padding:6px 8px;border:1px solid transparent;border-radius:6px;background:var(--bg2);color:var(--fg);font-size:12.5px;line-height:1.4;resize:vertical}
+.txt:focus{outline:none;border-color:var(--acc)}
 .opt{flex:0 1 150px;min-width:0;height:24px;padding:0 4px;border:1px solid transparent;border-radius:6px;background:var(--bg2);color:var(--fg);font-size:11.5px;cursor:pointer}
 .opt:focus{outline:none;border-color:var(--acc)}
 .opt option{background:var(--bg);color:var(--fg)}
@@ -266,6 +268,17 @@ export function mountUI({ model, onSave }) {
     return r;
   }
 
+  function textRow(c, orig) {
+    const row = h('div', 'ctl', `<div class="lab"><span class="name"></span><button class="rst" type="button" title="Вернуть исходный текст">${ICON.reset}</button></div><textarea class="txt" rows="3" spellcheck="false"></textarea>`);
+    row.querySelector('.name').textContent = c.label;
+    const ta = row.querySelector('.txt');
+    ta.setAttribute('aria-label', c.label);
+    const r = { c, orig, row };
+    gesture(r, ta, () => ta.value);
+    r.show = v => { if (root.activeElement !== ta) ta.value = v; };
+    return r;
+  }
+
   function colorRow(c, orig) {
     const row = h('div', 'ctl color', `<div class="lab"><span class="name"></span><input class="sw" type="color"><input class="hex" spellcheck="false" autocomplete="off"><button class="rst" type="button" title="Вернуть исходное (${formatColor(orig)})">${ICON.reset}</button></div><div class="alpha"><input type="range" min="0" max="1" step="0.01"><span class="pct"></span></div>`);
     row.querySelector('.name').textContent = c.label;
@@ -347,7 +360,7 @@ export function mountUI({ model, onSave }) {
       let sub;
       for (const c of g.controls) {
         if (c.sub && c.sub !== sub) { sub = c.sub; det.append(Object.assign(h('div', 'sub'), { textContent: sub })); }
-        const r = (c.kind === 'color' ? colorRow : c.kind === 'select' ? selectRow : rangeRow)(c, c.orig);
+        const r = ({ color: colorRow, select: selectRow, text: textRow }[c.kind] || rangeRow)(c, c.orig);
         r.group = sum.querySelector('.badge');
         r.row.querySelector('.rst').addEventListener('click', () => { model.begin(); run(planReset(r)); });
         state.rows.push(r);
@@ -628,7 +641,8 @@ export function mountUI({ model, onSave }) {
     try {
       const res = await onSave();
       if (res.ok) { state.saved = JSON.stringify(model.list()); sync(); }
-      say(res.text, res.ok ? 'ok' : 'err');
+      if (res.rerender) render();
+      say(res.text, res.kind || (res.ok ? 'ok' : 'err'));
     } finally {
       btn.disabled = false;
     }

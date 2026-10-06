@@ -4,6 +4,7 @@ import { serialize } from './css-writer.js';
 import { mountUI } from './ui.js';
 import { saveOutcome } from './actions.js';
 import { googleUrl, usedFonts } from './fonts.js';
+import { applyTexts, textPayload, bake } from './texts.js';
 
 const API = '/__js-art';
 
@@ -42,6 +43,7 @@ async function start() {
   let ui = null;
   const model = new Model(edits => {
     loadFonts(edits);
+    applyTexts(edits);
     live.textContent = serialize(edits);
     if (ui) ui.sync();
   });
@@ -57,14 +59,16 @@ async function start() {
   ui = mountUI({
     model,
     async onSave() {
-      const edits = model.list();
+      const all = model.list();
+      const edits = all.filter(e => e.prop !== '@text');
+      const texts = textPayload(all);
       const css = serialize(edits, { header: true, imports: true });
       let res = null, out = null;
       try {
         res = await fetch(API + '/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ css, state: { version: 1, edits } }),
+          body: JSON.stringify({ css, state: { version: 1, edits }, texts, page: location.pathname }),
         });
         out = await res.json().catch(() => null);
       } catch { /* network error: no server */ }
@@ -72,12 +76,19 @@ async function start() {
       if (outcome === 'error') return { ok: false, text: 'Ошибка сохранения: ' + (out.error || res.status) };
       if (outcome === 'ok') {
         const name = out.file ? out.file.split(/[\\/]/).slice(-2).join('/') : 'js-art.css';
-        return { ok: true, text: `Сохранено в ${name}` + (out.backup ? ' · бэкап в history/' : '') };
+        let text = `Сохранено в ${name}` + (out.backup ? ' · бэкап в history/' : ''), kind = 'ok';
+        const results = out.texts || [];
+        /* a text written into the HTML is part of the page now: stop treating it as a pending edit */
+        results.forEach((t, i) => { if (t.ok) { bake(texts[i].selector); model.set(texts[i].selector, '@text', null); } });
+        const done = results.filter(t => t.ok).length, failed = results.filter(t => !t.ok);
+        if (done) text += ` · текстов в HTML: ${done}`;
+        if (failed.length) { text += ` · текст не записан: ${failed[0].error}` + (failed.length > 1 ? ` (+${failed.length - 1})` : ''); kind = 'err'; }
+        return { ok: true, text, kind, rerender: done > 0 };
       }
       /* opened without the JS-Art server (or on a plain static server): hand the CSS over instead */
       try { await navigator.clipboard.writeText(css); } catch { /* clipboard blocked */ }
       download('js-art.css', css);
-      return { ok: true, text: 'Сервер не найден — CSS скопирован и скачан' };
+      return { ok: true, text: 'Сервер не найден — CSS скопирован и скачан' + (texts.length ? '; правки текста без сервера не сохраняются' : '') };
     },
   });
 }

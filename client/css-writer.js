@@ -24,6 +24,7 @@ export function mediaSelector(selector, active, inactive) {
 export function serialize(edits, { header = false, imports = false } = {}) {
   const groups = new Map();
   for (const { selector, prop, value, weak } of edits) {
+    if (prop.startsWith('@')) continue; /* '@text' edits go into the HTML, not the stylesheet */
     if (!groups.has(selector)) groups.set(selector, []);
     const decls = groups.get(selector);
     /* 'filter:contrast' + 'filter:brightness' → one filter declaration */

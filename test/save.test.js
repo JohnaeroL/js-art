@@ -47,3 +47,20 @@ test('save writes css and state, backs up, and links html only once', async () =
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(toolDir, 'state.json'), 'utf8')), { v: 2 });
   await fs.rm(tmp, { recursive: true, force: true });
 });
+
+test('save writes edited texts into the page HTML and backs the page up; failures are reported', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'js-art-'));
+  const root = path.join(tmp, 'site'), toolDir = path.join(tmp, 'tool');
+  await fs.mkdir(root, { recursive: true });
+  const page = path.join(root, 'index.html');
+  await fs.writeFile(page, '<html><head></head><body><h1>Hello</h1><p>Same</p><p>Same</p></body></html>');
+  const texts = [
+    { from: 'Hello', to: 'Привет', index: 0, total: 1 },
+    { from: 'Same', to: 'X', index: 1, total: 3 },
+  ];
+  const r = await save({ root, out: 'css/js-art.css', toolDir, css: '', state: {}, texts, pageFile: page, now: new Date(2026, 0, 1, 0, 0, 1) });
+  assert.deepEqual(r.texts.map(t => t.ok), [true, false]);
+  const html = await fs.readFile(page, 'utf8');
+  assert.ok(html.includes('<h1>Привет</h1>') && html.includes('<p>Same</p><p>Same</p>'));
+  assert.ok((await fs.readdir(path.join(toolDir, 'history'))).some(n => n.endsWith('_index.html')));
+});

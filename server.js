@@ -32,6 +32,16 @@ function inside(base, urlPath) {
   return rel.startsWith('..') || path.isAbsolute(rel) ? null : full;
 }
 
+/* the HTML file a page URL was served from, or null (outside root, not .html, missing) */
+async function pageHtml(root, urlPath) {
+  if (typeof urlPath !== 'string') return null;
+  let file = inside(root, urlPath);
+  if (!file) return null;
+  try { if ((await fs.stat(file)).isDirectory()) file = path.join(file, 'index.html'); } catch { return null; }
+  if (path.extname(file).toLowerCase() !== '.html') return null;
+  return fs.access(file).then(() => file, () => null);
+}
+
 const send = (res, status, body, type = 'text/plain; charset=utf-8') => {
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
   res.end(body);
@@ -102,7 +112,12 @@ export function createServer({ root, out = 'css/js-art.css', toolDir = TOOL_DIR,
         try { data = JSON.parse(await readBody(req)); }
         catch (e) { return e.status ? send(res, e.status, e.message) : json(res, 400, { ok: false, error: 'Invalid JSON' }); }
         if (typeof data.css !== 'string') return json(res, 400, { ok: false, error: 'css must be a string' });
-        try { return json(res, 200, { ok: true, ...(await save({ root, out, toolDir, css: data.css, state: data.state ?? {} })) }); }
+        const texts = Array.isArray(data.texts) ? data.texts.slice(0, 200) : [];
+        if (!texts.every(t => t && typeof t.from === 'string' && typeof t.to === 'string' && Number.isInteger(t.index) && Number.isInteger(t.total))) {
+          return json(res, 400, { ok: false, error: 'texts must be [{from, to, index, total}]' });
+        }
+        const pageFile = texts.length ? await pageHtml(root, data.page) : null;
+        try { return json(res, 200, { ok: true, ...(await save({ root, out, toolDir, css: data.css, state: data.state ?? {}, texts, pageFile })) }); }
         catch (e) { return json(res, 500, { ok: false, error: e.message }); }
       }
 
