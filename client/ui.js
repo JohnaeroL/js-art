@@ -45,7 +45,9 @@ svg{width:16px;height:16px;display:block}
 .fab.dirty::after{content:"";position:absolute;top:2px;right:2px;width:10px;height:10px;border-radius:50%;background:#ffb020;border:2px solid var(--bg)}
 .panel{position:fixed;z-index:2147483647;width:320px;display:flex;flex-direction:column;max-height:calc(100vh - 100px);background:var(--bg);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
 .panel[hidden]{display:none}
-.top{display:flex;align-items:center;gap:6px;padding:8px 8px 8px 14px;border-bottom:1px solid var(--line)}
+.wrap.open .fab{visibility:hidden}
+.top{cursor:grab;touch-action:none;user-select:none;display:flex;align-items:center;gap:6px;padding:8px 8px 8px 14px;border-bottom:1px solid var(--line)}
+.top.moving{cursor:grabbing}
 .brand{flex:1;font-weight:700;font-size:13.5px;letter-spacing:-.02em}
 .brand i{font-style:normal;color:var(--acc)}
 .ib{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--mut)}
@@ -189,6 +191,7 @@ export function mountUI({ model, onSave }) {
     open: store.get('open', false),
     scope: store.get('scope', 'page'),
     pos: store.get('pos', { right: 20, bottom: 20 }),
+    panelPos: store.get('panelPos', null),
     groupsOpen: store.get('groups', {}),
     mode: 'all',
     el: null,
@@ -448,18 +451,54 @@ export function mountUI({ model, onSave }) {
     fab.style.bottom = state.pos.bottom + 'px';
     placePanel();
   }
+  /* the button's box from its saved position: it is only hidden (not removed) while the panel is open */
+  const fabRect = () => ({ right: innerWidth - state.pos.right, left: innerWidth - state.pos.right - 44, bottom: innerHeight - state.pos.bottom, top: innerHeight - state.pos.bottom - 44 });
+  const sheet = () => matchMedia('(max-width:560px)').matches;
   function placePanel() {
     const s = panel.style;
-    if (matchMedia('(max-width:560px)').matches) { s.left = s.right = s.top = s.bottom = s.maxHeight = ''; return; }
-    const r = fab.getBoundingClientRect(), gap = 10;
-    if (r.left + r.width / 2 > innerWidth / 2) { s.right = innerWidth - r.right + 'px'; s.left = 'auto'; }
+    if (sheet()) { s.left = s.right = s.top = s.bottom = s.maxHeight = ''; return; }
+    if (state.panelPos) {
+      /* moved by the header: keep it on screen even after the window shrinks */
+      const left = Math.min(Math.max(0, state.panelPos.left), Math.max(0, innerWidth - panel.offsetWidth));
+      const top = Math.min(Math.max(0, state.panelPos.top), Math.max(0, innerHeight - 80));
+      Object.assign(s, { left: left + 'px', top: top + 'px', right: 'auto', bottom: 'auto', maxHeight: Math.max(200, innerHeight - top - 12) + 'px' });
+      return;
+    }
+    const r = fabRect(), gap = 10;
+    if (r.left + 22 > innerWidth / 2) { s.right = innerWidth - r.right + 'px'; s.left = 'auto'; }
     else { s.left = r.left + 'px'; s.right = 'auto'; }
-    if (r.top + r.height / 2 > innerHeight / 2) {
+    if (r.top + 22 > innerHeight / 2) {
       s.bottom = innerHeight - r.top + gap + 'px'; s.top = 'auto'; s.maxHeight = r.top - gap - 12 + 'px';
     } else {
       s.top = r.bottom + gap + 'px'; s.bottom = 'auto'; s.maxHeight = innerHeight - r.bottom - gap - 12 + 'px';
     }
   }
+
+  /* drag the panel by its header (not on the phone-width bottom sheet, and not from the buttons) */
+  const header = root.querySelector('.top');
+  let pdrag = null;
+  header.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || sheet() || e.target.closest('button')) return;
+    header.setPointerCapture(e.pointerId);
+    const r = panel.getBoundingClientRect();
+    pdrag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    header.classList.add('moving');
+  });
+  header.addEventListener('pointermove', e => {
+    if (!pdrag) return;
+    state.panelPos = { left: e.clientX - pdrag.dx, top: e.clientY - pdrag.dy };
+    placePanel();
+  });
+  const endPanelDrag = () => {
+    if (!pdrag) return;
+    pdrag = null;
+    header.classList.remove('moving');
+    const r = panel.getBoundingClientRect();
+    state.panelPos = { left: r.left, top: r.top };
+    store.set('panelPos', state.panelPos);
+  };
+  header.addEventListener('pointerup', endPanelDrag);
+  header.addEventListener('pointercancel', endPanelDrag);
 
   function setOpen(open) {
     state.open = open;
