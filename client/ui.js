@@ -23,12 +23,17 @@ const ICON = {
   down: svg('<path d="m6 9 6 6 6-6"/>'),
   reset: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'),
   lock: svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'),
+  sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
+  moon: svg('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'),
   unlock: svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>'),
 };
 
+const DARK = '--bg:#1c1c20;--bg2:#2a2a30;--fg:#f4f4f5;--mut:#a1a1aa;--line:rgba(255,255,255,.09);--acc:#8b7fff;--acc-fg:#fff;--shadow:0 16px 48px -12px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.08)';
+
 const CSS = `
 :host{all:initial;--bg:#fff;--bg2:#f2f2f5;--fg:#18181b;--mut:#71717a;--line:rgba(0,0,0,.09);--acc:#6d5efc;--acc-fg:#fff;--shadow:0 16px 48px -12px rgba(0,0,0,.3),0 0 0 1px rgba(0,0,0,.07)}
-@media (prefers-color-scheme:dark){:host{--bg:#1c1c20;--bg2:#2a2a30;--fg:#f4f4f5;--mut:#a1a1aa;--line:rgba(255,255,255,.09);--acc:#8b7fff;--acc-fg:#fff;--shadow:0 16px 48px -12px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.08)}}
+@media (prefers-color-scheme:dark){:host(:not([data-theme=light])){${DARK}}}
+:host([data-theme=dark]){${DARK}}
 *{box-sizing:border-box;margin:0;font:inherit;color:inherit}
 .wrap{font:400 12.5px/1.4 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--fg);-webkit-font-smoothing:antialiased}
 button{background:none;border:0;padding:0;cursor:pointer}
@@ -131,6 +136,7 @@ const HTML = `
   <section class="panel" data-el="panel" role="dialog" aria-label="JS-Art" hidden>
     <header class="top">
       <b class="brand">JS<i>-</i>Art</b>
+      <button class="ib" data-act="theme" type="button"></button>
       <button class="ib" data-act="undo" type="button" title="Отменить (Ctrl+Z)" aria-label="Отменить">${ICON.undo}</button>
       <button class="ib" data-act="redo" type="button" title="Повторить (Ctrl+Shift+Z)" aria-label="Повторить">${ICON.redo}</button>
       <button class="ib" data-act="close" type="button" title="Свернуть (Esc)" aria-label="Свернуть">${ICON.close}</button>
@@ -177,7 +183,9 @@ export function mountUI({ model, onSave }) {
   const status = $('status'), hl = $('hl'), selbox = $('selbox');
   const act = name => root.querySelector(`[data-act="${name}"]`);
 
+  const dark = matchMedia('(prefers-color-scheme: dark)');
   const state = {
+    theme: store.get('theme', null),
     open: store.get('open', false),
     scope: store.get('scope', 'page'),
     pos: store.get('pos', { right: 20, bottom: 20 }),
@@ -507,6 +515,23 @@ export function mountUI({ model, onSave }) {
     if (state.el) select(state.el);
   }));
   root.querySelector('[data-mode="all"]').classList.add('on');
+
+  /* theme: follows the system until the button is used, then the choice is remembered */
+  function applyTheme() {
+    if (state.theme) host.dataset.theme = state.theme; else delete host.dataset.theme;
+    const isDark = (state.theme || (dark.matches ? 'dark' : 'light')) === 'dark';
+    const b = act('theme'), label = isDark ? 'Светлая тема панели' : 'Тёмная тема панели';
+    b.innerHTML = isDark ? ICON.sun : ICON.moon;
+    b.title = label;
+    b.setAttribute('aria-label', label);
+  }
+  act('theme').addEventListener('click', () => {
+    state.theme = host.dataset.theme === 'dark' || (!host.dataset.theme && dark.matches) ? 'light' : 'dark';
+    store.set('theme', state.theme);
+    applyTheme();
+  });
+  dark.addEventListener('change', applyTheme);
+  applyTheme();
 
   act('close').addEventListener('click', () => setOpen(false));
   act('undo').addEventListener('click', () => model.undo());
