@@ -25,6 +25,7 @@ const ICON = {
   lock: svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'),
   sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
   moon: svg('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'),
+  move: svg('<path d="M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3"/>'),
   unlock: svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>'),
 };
 
@@ -52,6 +53,7 @@ svg{width:16px;height:16px;display:block}
 .brand i{font-style:normal;color:var(--acc)}
 .ib{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--mut)}
 .ib:hover:not(:disabled){background:var(--bg2);color:var(--fg)}
+.ib.on{background:var(--acc);color:var(--acc-fg)}
 .ib:disabled{opacity:.35;cursor:default}
 .seg{display:flex;gap:2px;padding:2px;border-radius:8px;background:var(--bg2)}
 .seg button{flex:1;height:26px;padding:0 8px;border-radius:6px;font-weight:500;color:var(--mut);white-space:nowrap}
@@ -155,6 +157,7 @@ const HTML = `
       </div>
       <div class="row">
         <button class="ib" data-act="up" type="button" title="Родительский элемент" aria-label="Родительский элемент">${ICON.up}</button>
+        <button class="ib" data-act="move" type="button" title="Двигать блок мышью на странице" aria-label="Двигать блок" aria-pressed="false">${ICON.move}</button>
         <button class="ib" data-act="down" type="button" title="Дочерний элемент" aria-label="Дочерний элемент">${ICON.down}</button>
         <div class="seg mode" role="group" aria-label="Охват">
           <button type="button" data-mode="all" title="Все элементы с таким же селектором">Все такие</button>
@@ -420,7 +423,39 @@ export function mountUI({ model, onSave }) {
     raf = requestAnimationFrame(loop);
   }
 
+  /* ───── move: drag the selected block on the page, written as translate X/Y ───── */
+  const inPanel = e => e.composedPath().includes(host);
+  const axis = p => state.rows.find(r => r.c.keys[0].prop === p);
+  let mv = null;
+  function setMoving(on) {
+    state.moving = on && !!state.el && state.scope === 'block';
+    act('move').classList.toggle('on', state.moving);
+    act('move').setAttribute('aria-pressed', state.moving);
+    if (!state.moving) mv = null;
+  }
+  addEventListener('pointerdown', e => {
+    const rx = axis('translate:x'), ry = axis('translate:y');
+    if (!state.moving || e.button !== 0 || inPanel(e) || !rx || !ry || !state.el.contains(e.target)) return;
+    e.preventDefault(); e.stopPropagation();
+    model.begin();
+    mv = { x: e.clientX, y: e.clientY, x0: current(rx), y0: current(ry), rx, ry };
+  }, true);
+  addEventListener('pointermove', e => {
+    if (!mv) return;
+    apply(mv.rx, Math.round(mv.x0 + e.clientX - mv.x));
+    apply(mv.ry, Math.round(mv.y0 + e.clientY - mv.y));
+  }, true);
+  const endMove = () => { mv = null; };
+  addEventListener('pointerup', endMove, true);
+  addEventListener('pointercancel', endMove, true);
+  /* a click on the block while moving must not follow links or press buttons */
+  addEventListener('click', e => {
+    if (state.moving && !inPanel(e) && state.el && state.el.contains(e.target)) { e.preventDefault(); e.stopPropagation(); }
+  }, true);
+  act('move').addEventListener('click', () => setMoving(!state.moving));
+
   function pick() {
+    setMoving(false);
     if (state.stopPick) { state.stopPick(); endPick(); return; }
     act('pick').classList.add('on');
     act('pick').querySelector('span').textContent = 'Отмена';
@@ -544,6 +579,7 @@ export function mountUI({ model, onSave }) {
       b.setAttribute('aria-selected', b.dataset.scope === scope);
     });
     $('blockbar').hidden = scope !== 'block';
+    setMoving(false);
     render();
     loop();
   }

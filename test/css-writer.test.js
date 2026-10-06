@@ -54,3 +54,12 @@ test('selectors wrapped in @media are emitted inside that media block', () => {
   const css = serialize([{ selector: '@media (prefers-color-scheme:dark){:root:not([data-theme="light"])}', prop: '--bg', value: '#111' }]);
   assert.equal(css, '@media (prefers-color-scheme:dark) {\n  :root:not([data-theme="light"]) {\n    --bg: #111;\n  }\n}\n');
 });
+
+test('translate:x and translate:y merge into one translate declaration, a missing axis is 0', () => {
+  const both = serialize([
+    { selector: '.a', prop: 'translate:x', value: '12px' },
+    { selector: '.a', prop: 'translate:y', value: '-5px' },
+  ]);
+  assert.equal(both, '.a {\n  translate: 12px -5px !important;\n}\n');
+  assert.ok(serialize([{ selector: '.a', prop: 'translate:y', value: '8px' }]).includes('translate: 0px 8px !important;'));
+});

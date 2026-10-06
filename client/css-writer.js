@@ -31,6 +31,12 @@ export function serialize(edits, { header = false, imports = false } = {}) {
       const fn = `${prop.slice(7)}(${value})`;
       const f = decls.find(d => d.prop === 'filter');
       if (f) f.value += ' ' + fn; else decls.push({ prop: 'filter', value: fn });
+    } else if (prop.startsWith('translate:')) {
+      /* 'translate:x' + 'translate:y' → one translate declaration; a missing axis stays 0 */
+      let t = decls.find(d => d.prop === 'translate');
+      if (!t) { t = { prop: 'translate', value: '', axes: ['0px', '0px'] }; decls.push(t); }
+      t.axes[prop.endsWith('x') ? 0 : 1] = value;
+      t.value = t.axes.join(' ');
     } else {
       decls.push({ prop, value, weak });
     }

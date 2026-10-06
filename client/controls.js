@@ -157,6 +157,12 @@ export function pageControls() {
   return groups.filter(g => g.controls.length);
 }
 
+/* computed `translate` is 'none', 'X' or 'X Y' in px */
+const translateOf = el => {
+  const [x, y] = (cs(el).translate || '').split(/\s+/);
+  return [num(x), num(y)];
+};
+
 const SIDES = [['top', 'сверху'], ['right', 'справа'], ['bottom', 'снизу'], ['left', 'слева']];
 
 export function blockControls(el, selector) {
@@ -164,6 +170,15 @@ export function blockControls(el, selector) {
   const sides = (box, label, min) => SIDES.map(([side, word]) =>
     px({ label: `${label} ${word}`, selector, prop: `${box}-${side}`, min, lock: box }, () => num(cs(el).getPropertyValue(`${box}-${side}`))));
 
+  const pos = [
+    px({ label: 'Сдвиг по X', selector, prop: 'translate:x', min: -500, max: 500 }, () => translateOf(el)[0]),
+    px({ label: 'Сдвиг по Y', selector, prop: 'translate:y', min: -500, max: 500 }, () => translateOf(el)[1]),
+  ];
+  const pd = el.parentElement && cs(el.parentElement).display;
+  if (pd && /flex|grid/.test(pd)) {
+    pos.push(single({ label: 'Порядок (order)', selector, prop: 'order', min: -10, max: 10, step: 1, read: () => parseInt(cs(el).order, 10) || 0, write: v => String(v) }));
+  }
+  groups.push({ id: 'pos', label: 'Положение', controls: pos });
   groups.push({ id: 'colors', label: 'Цвета', controls: [
     color({ label: 'Фон', selector, prop: 'background-color', el }),
     color({ label: 'Текст', selector, prop: 'color', el }),
