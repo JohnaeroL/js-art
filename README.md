@@ -1,4 +1,7 @@
-<img src="assets/logo.svg" width="72" alt="">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-wordmark-dark.svg">
+  <img src="assets/logo-wordmark.svg" height="64" alt="JS-Art">
+</picture>
 
 # JS-Art
 
