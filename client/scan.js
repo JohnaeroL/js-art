@@ -146,3 +146,11 @@ export function classStats(cls) {
   const tag = list[0] && list[0].tagName;
   return { count: list.length, sameTag: [...list].every(e => e.tagName === tag) };
 }
+
+/* what detectScheme needs to find out how the site switches themes */
+export function themeSources() {
+  const selectors = [];
+  for (const { rule } of allRules()) if (selectors.length < 5000) selectors.push(rule.selectorText);
+  const html = document.documentElement;
+  return { selectors, attrs: Object.fromEntries([...html.attributes].map(a => [a.name, a.value])), classes: [...html.classList] };
+}

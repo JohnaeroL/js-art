@@ -2,7 +2,8 @@
    styles and the panel's styles never touch. */
 import { toHex, formatColor, parseColor } from './color.js';
 import { selectorFor } from './selector.js';
-import { withOverridesDisabled, classStats } from './scan.js';
+import { withOverridesDisabled, classStats, themeSources } from './scan.js';
+import { detectScheme, forTheme } from './theme.js';
 import { planApply, planReset, shortcut, SCREENS, forScreen } from './actions.js';
 import { pageControls, blockControls } from './controls.js';
 import { startPicker } from './picker.js';
@@ -160,6 +161,11 @@ const HTML = `
       <button type="button" data-screen="desktop" title="Правки только для ширины от 768px">Десктоп</button>
       <button type="button" data-screen="mobile" title="Правки только для ширины до 767px">Мобильный</button>
     </div>
+    <div class="seg scope scr" role="group" aria-label="Тема сайта, для которой вносятся правки">
+      <button type="button" data-sitetheme="all" title="Правки для любой темы сайта">Все темы</button>
+      <button type="button" data-sitetheme="light" title="Правки только для светлой темы сайта">Светлая</button>
+      <button type="button" data-sitetheme="dark" title="Правки только для тёмной темы сайта">Тёмная</button>
+    </div>
     <div class="blockbar" data-el="blockbar" hidden>
       <div class="row">
         <button class="pick" data-act="pick" type="button">${ICON.pick}<span>Выбрать</span></button>
@@ -204,6 +210,8 @@ export function mountUI({ model, onSave }) {
     theme: store.get('theme', null),
     open: store.get('open', false),
     scope: store.get('scope', 'page'),
+    siteTheme: ['light', 'dark'].includes(store.get('siteTheme')) ? store.get('siteTheme') : 'all',
+    scheme: null,
     screen: SCREENS[store.get('screen', 'all')] !== undefined ? store.get('screen', 'all') : 'all',
     pos: store.get('pos', { right: 20, bottom: 20 }),
     panelPos: store.get('panelPos', null),
@@ -337,9 +345,14 @@ export function mountUI({ model, onSave }) {
     });
     const cond = SCREENS[state.screen];
     forScreen(groups, cond);
+    forTheme(groups, scheme(), state.siteTheme);
     if (cond && !matchMedia(cond).matches) {
       const mobile = state.screen === 'mobile';
       body.append(Object.assign(h('p', 'note'), { textContent: `Окно сейчас ${innerWidth}px: правки для ${mobile ? 'мобильных работают при ширине до 767px' : 'десктопа работают при ширине от 768px'}. ${mobile ? 'Сузьте' : 'Расширьте'} окно браузера (или включите режим устройства: F12, Ctrl+Shift+M), иначе результат не виден, а исходные значения ниже взяты для текущей ширины.` }));
+    }
+    if (state.siteTheme !== 'all' && scheme().kind === 'media' && matchMedia('(prefers-color-scheme: dark)').matches !== (state.siteTheme === 'dark')) {
+      const dark = state.siteTheme === 'dark';
+      body.append(Object.assign(h('p', 'note'), { textContent: `Сайт переключает тему по настройке системы, а она сейчас ${dark ? 'светлая' : 'тёмная'}: правки для ${dark ? 'тёмной' : 'светлой'} темы на странице не видны, а исходные значения ниже взяты для текущей. Переключите тему ОС (или F12 → ⋮ → More tools → Rendering → Emulate prefers-color-scheme).` }));
     }
     const openMap = state.groupsOpen[state.scope] || {};
     groups.forEach((g, i) => {
@@ -620,6 +633,7 @@ export function mountUI({ model, onSave }) {
   /* ───── header & footer ───── */
   function setScope(scope) {
     markScreen();
+    markTheme();
     state.scope = scope;
     store.set('scope', scope);
     root.querySelectorAll('[data-scope]').forEach(b => {
@@ -646,6 +660,38 @@ export function mountUI({ model, onSave }) {
     markScreen();
     render();
   }));
+  /* site theme: which theme the edits are for. For a site that switches by attribute or class the tool switches
+     the page itself, so the edited theme is the one on screen (restored with "Все темы"); a media-based theme
+     follows the system and can only be hinted at */
+  const scheme = () => (state.scheme ||= detectScheme(themeSources()));
+  let themeBackup = null;
+  function previewTheme() {
+    const sch = scheme(), html = document.documentElement, t = state.siteTheme;
+    if (sch.kind === 'media') return;
+    if (sch.kind === 'attr') {
+      themeBackup ||= { v: html.getAttribute(sch.name) };
+      const target = t === 'all' ? themeBackup.v : t === 'dark' ? sch.dark : sch.light;
+      if (target == null) html.removeAttribute(sch.name); else html.setAttribute(sch.name, target);
+    } else {
+      themeBackup ||= { had: html.classList.contains(sch.dark) };
+      html.classList.toggle(sch.dark, t === 'all' ? themeBackup.had : t === 'dark');
+    }
+    if (t === 'all') themeBackup = null;
+  }
+  function markTheme() {
+    root.querySelectorAll('[data-sitetheme]').forEach(b => {
+      b.classList.toggle('on', b.dataset.sitetheme === state.siteTheme);
+      b.setAttribute('aria-pressed', b.dataset.sitetheme === state.siteTheme);
+    });
+  }
+  root.querySelectorAll('[data-sitetheme]').forEach(b => b.addEventListener('click', () => {
+    state.siteTheme = b.dataset.sitetheme;
+    store.set('siteTheme', state.siteTheme);
+    markTheme();
+    previewTheme();
+    render();
+  }));
+
   /* crossing the breakpoint changes the originals the controls read, and the hint */
   for (const cond of Object.values(SCREENS)) {
     if (cond) matchMedia(cond).addEventListener('change', () => { if (state.open && state.screen !== 'all') render(); });
@@ -740,6 +786,7 @@ export function mountUI({ model, onSave }) {
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', rerenderPage);
 
   placeFab();
+  if (state.siteTheme !== 'all') previewTheme();
   setScope(state.scope);
   setOpen(state.open);
 
