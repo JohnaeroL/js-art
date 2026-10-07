@@ -123,6 +123,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .status.err{color:#e5484d}.status.ok{color:#30a46c}
 .ghost{height:30px;padding:0 10px;border-radius:8px;border:1px solid var(--line);color:var(--mut);white-space:nowrap}
 .ghost:hover{color:var(--fg);border-color:var(--mut)}
+.ghost.armed{color:#e5484d;border-color:#e5484d}
 .primary{height:30px;padding:0 14px;border-radius:8px;background:var(--acc);color:var(--acc-fg);font-weight:600;white-space:nowrap}
 .primary:disabled{opacity:.6;cursor:default}
 .box{position:fixed;z-index:2147483646;pointer-events:none;border:2px solid var(--acc);background:color-mix(in srgb,var(--acc) 12%,transparent);border-radius:3px}
@@ -685,7 +686,27 @@ export function mountUI({ model, onSave }) {
     const c = state.el && [...state.el.children].find(x => x.localName !== 'js-art-root' && x.localName !== 'script' && x.localName !== 'style');
     if (c) select(c);
   });
-  act('resetall').addEventListener('click', () => { if (model.list().length) { model.reset(); say('Всё сброшено к исходному — Ctrl+Z вернёт'); } });
+  /* two-step reset: the first click arms the button for 3 s, the second one resets */
+  const resetBtn = act('resetall'), resetLabel = resetBtn.textContent;
+  let resetTimer = 0;
+  const disarm = () => {
+    clearTimeout(resetTimer);
+    resetBtn.textContent = resetLabel;
+    resetBtn.classList.remove('armed');
+  };
+  resetBtn.addEventListener('click', () => {
+    if (!model.list().length) return;
+    if (!resetBtn.classList.contains('armed')) {
+      resetBtn.textContent = 'Точно сбросить?';
+      resetBtn.classList.add('armed');
+      resetTimer = setTimeout(disarm, 3000);
+      return;
+    }
+    disarm();
+    model.reset();
+    say('Всё сброшено к исходному — Ctrl+Z вернёт');
+  });
+  resetBtn.addEventListener('blur', disarm);
   act('save').addEventListener('click', async () => {
     const btn = act('save');
     btn.disabled = true;
