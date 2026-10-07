@@ -3,7 +3,7 @@
 import { toHex, formatColor, parseColor } from './color.js';
 import { selectorFor } from './selector.js';
 import { withOverridesDisabled, classStats } from './scan.js';
-import { planApply, planReset, shortcut } from './actions.js';
+import { planApply, planReset, shortcut, SCREENS, forScreen } from './actions.js';
 import { pageControls, blockControls } from './controls.js';
 import { startPicker } from './picker.js';
 
@@ -60,6 +60,8 @@ svg{width:16px;height:16px;display:block}
 .seg button{flex:1;height:26px;padding:0 8px;border-radius:6px;font-weight:500;color:var(--mut);white-space:nowrap}
 .seg button.on{background:var(--bg);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .scope{margin:10px 12px 4px}
+.scr{margin-top:0}
+.note{margin:8px 12px 4px;padding:8px 10px;border-radius:8px;background:var(--bg2);color:var(--mut);font-size:11.5px;line-height:1.45}
 .blockbar{display:grid;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line)}
 .blockbar[hidden]{display:none}
 .row{display:flex;align-items:center;gap:6px;min-width:0}
@@ -152,6 +154,11 @@ const HTML = `
       <button type="button" role="tab" data-scope="page">Страница</button>
       <button type="button" role="tab" data-scope="block">Блок</button>
     </div>
+    <div class="seg scope scr" role="group" aria-label="Экран, для которого вносятся правки">
+      <button type="button" data-screen="all" title="Правки для любой ширины экрана">Все экраны</button>
+      <button type="button" data-screen="desktop" title="Правки только для ширины от 768px">Десктоп</button>
+      <button type="button" data-screen="mobile" title="Правки только для ширины до 767px">Мобильный</button>
+    </div>
     <div class="blockbar" data-el="blockbar" hidden>
       <div class="row">
         <button class="pick" data-act="pick" type="button">${ICON.pick}<span>Выбрать</span></button>
@@ -196,6 +203,7 @@ export function mountUI({ model, onSave }) {
     theme: store.get('theme', null),
     open: store.get('open', false),
     scope: store.get('scope', 'page'),
+    screen: SCREENS[store.get('screen', 'all')] !== undefined ? store.get('screen', 'all') : 'all',
     pos: store.get('pos', { right: 20, bottom: 20 }),
     panelPos: store.get('panelPos', null),
     groupsOpen: store.get('groups', {}),
@@ -326,6 +334,12 @@ export function mountUI({ model, onSave }) {
       for (const g of gs) for (const c of g.controls) c.orig = c.read();
       return gs;
     });
+    const cond = SCREENS[state.screen];
+    forScreen(groups, cond);
+    if (cond && !matchMedia(cond).matches) {
+      const mobile = state.screen === 'mobile';
+      body.append(Object.assign(h('p', 'note'), { textContent: `Окно сейчас ${innerWidth}px: правки для ${mobile ? 'мобильных работают при ширине до 767px' : 'десктопа работают при ширине от 768px'}. ${mobile ? 'Сузьте' : 'Расширьте'} окно браузера (или включите режим устройства: F12, Ctrl+Shift+M), иначе результат не виден, а исходные значения ниже взяты для текущей ширины.` }));
+    }
     const openMap = state.groupsOpen[state.scope] || {};
     groups.forEach((g, i) => {
       const det = h('details', 'grp');
@@ -604,6 +618,7 @@ export function mountUI({ model, onSave }) {
 
   /* ───── header & footer ───── */
   function setScope(scope) {
+    markScreen();
     state.scope = scope;
     store.set('scope', scope);
     root.querySelectorAll('[data-scope]').forEach(b => {
@@ -616,6 +631,24 @@ export function mountUI({ model, onSave }) {
     loop();
   }
   root.querySelectorAll('[data-scope]').forEach(b => b.addEventListener('click', () => setScope(b.dataset.scope)));
+
+  /* screen: which window width the edits are for (written inside a media query) */
+  function markScreen() {
+    root.querySelectorAll('[data-screen]').forEach(b => {
+      b.classList.toggle('on', b.dataset.screen === state.screen);
+      b.setAttribute('aria-pressed', b.dataset.screen === state.screen);
+    });
+  }
+  root.querySelectorAll('[data-screen]').forEach(b => b.addEventListener('click', () => {
+    state.screen = b.dataset.screen;
+    store.set('screen', state.screen);
+    markScreen();
+    render();
+  }));
+  /* crossing the breakpoint changes the originals the controls read, and the hint */
+  for (const cond of Object.values(SCREENS)) {
+    if (cond) matchMedia(cond).addEventListener('change', () => { if (state.open && state.screen !== 'all') render(); });
+  }
   root.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
     state.mode = b.dataset.mode;
     root.querySelectorAll('[data-mode]').forEach(x => x.classList.toggle('on', x === b));

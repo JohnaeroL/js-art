@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { serialize, scaleValue, mediaSelector, HEADER } from '../client/css-writer.js';
+import { serialize, scaleValue, mediaSelector, withMedia, HEADER } from '../client/css-writer.js';
 
 test('weak edits are written without !important', () => {
   assert.equal(serialize([{ selector: 'p', prop: 'font-size', value: 'calc(1em * 1.1)', weak: true }]), 'p {\n  font-size: calc(1em * 1.1);\n}\n');
@@ -62,4 +62,32 @@ test('translate:x and translate:y merge into one translate declaration, a missin
   ]);
   assert.equal(both, '.a {\n  translate: 12px -5px !important;\n}\n');
   assert.ok(serialize([{ selector: '.a', prop: 'translate:y', value: '8px' }]).includes('translate: 0px 8px !important;'));
+});
+
+test('shadow components merge into one box-shadow, untouched ones keep the site shadow', () => {
+  const base = { selector: '.c', prop: 'shadow:base', value: { x: 0, y: 4, blur: 8, spread: 0, color: 'rgba(0, 0, 0, 0.2)', inset: '' } };
+  const css = serialize([{ selector: '.c', prop: 'shadow:y', value: '10px' }, base]);
+  assert.equal(css, '.c {\n  box-shadow: 0px 10px 8px 0px rgba(0, 0, 0, 0.2) !important;\n}\n');
+  const inset = serialize([{ selector: '.c', prop: 'shadow:inset', value: 'inset' }, { selector: '.c', prop: 'shadow:color', value: '#ff0000' }, base]);
+  assert.ok(inset.includes('box-shadow: inset 0px 4px 8px 0px #ff0000 !important;'));
+});
+
+test('a lone shadow:base writes nothing; without a base the shadow starts from zero', () => {
+  const base = { selector: '.c', prop: 'shadow:base', value: { x: 1, y: 1, blur: 1, spread: 1, color: 'red', inset: '' } };
+  assert.equal(serialize([base]), '');
+  assert.ok(serialize([{ selector: '.c', prop: 'shadow:blur', value: '12px' }]).includes('box-shadow: 0px 0px 12px 0px rgba(0, 0, 0, 0.25) !important;'));
+});
+
+test('withMedia wraps a selector or merges with an existing media condition', () => {
+  assert.equal(withMedia('.a', '(max-width: 767px)'), '@media (max-width: 767px){.a}');
+  assert.equal(withMedia('@media (not (prefers-color-scheme: dark)){:root}', '(max-width: 767px)'),
+    '@media (max-width: 767px) and (not (prefers-color-scheme: dark)){:root}');
+});
+
+test('media blocks are written after the plain ones so a screen rule wins', () => {
+  const css = serialize([
+    { selector: withMedia('.a', '(max-width: 767px)'), prop: 'color', value: 'red' },
+    { selector: '.a', prop: 'color', value: 'blue' },
+  ]);
+  assert.ok(css.indexOf('color: blue') < css.indexOf('@media (max-width: 767px)'));
 });

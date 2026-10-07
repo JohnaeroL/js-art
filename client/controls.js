@@ -175,6 +175,47 @@ const translateOf = el => {
   return [num(x), num(y)];
 };
 
+/* first shadow of a computed box-shadow value; defaults describe "no shadow" */
+export function parseShadow(v) {
+  const none = { x: 0, y: 0, blur: 0, spread: 0, color: { r: 0, g: 0, b: 0, a: 0.25 }, inset: false };
+  if (!v || v === 'none') return none;
+  let depth = 0, end = v.length;
+  for (let i = 0; i < v.length; i++) {
+    if (v[i] === '(') depth++;
+    else if (v[i] === ')') depth--;
+    else if (v[i] === ',' && !depth) { end = i; break; }
+  }
+  const first = v.slice(0, end);
+  const cm = /(?:rgba?|hsla?|color|oklch|oklab|lab|lch)\([^)]*\)|#[0-9a-f]{3,8}\b/i.exec(first);
+  const rest = cm ? first.replace(cm[0], '') : first;
+  const n = (rest.match(/-?[\d.]+(?=px)/g) || []).map(Number);
+  return { x: n[0] || 0, y: n[1] || 0, blur: n[2] || 0, spread: n[3] || 0, color: (cm && parseColor(cm[0])) || none.color, inset: /\binset\b/.test(rest) };
+}
+
+/* box-shadow as several controls. Each one writes its own component plus 'shadow:base' — the site's shadow —
+   so the components that were not touched keep the site's values (css-writer merges them into one declaration).
+   base is not in keys: it belongs to no row, resetting a row never removes it. */
+function shadowControls(el, selector) {
+  const st = { base: parseShadow('none') };
+  const reload = () => { st.base = parseShadow(cs(el).boxShadow); return st.base; };
+  const base = () => ({ selector, prop: 'shadow:base', value: { ...st.base, color: formatColor(st.base.color), inset: st.base.inset ? 'inset' : '' } });
+  const part = (key, o) => {
+    const c = single({ selector, prop: 'shadow:' + key, ...o });
+    c.edits = v => [{ selector, prop: c.keys[0].prop, value: o.write(v) }, base()];
+    return c;
+  };
+  const num = (key, label, min, max) => part(key, { label, unit: 'px', min, max, step: 1, read: () => reload()[key], write: v => `${v}px` });
+  return [
+    num('x', 'Смещение по X', -100, 100),
+    num('y', 'Смещение по Y', -100, 100),
+    num('blur', 'Размытие', 0, 100),
+    num('spread', 'Растяжение', -50, 50),
+    part('color', { label: 'Цвет и прозрачность', kind: 'color', read: () => reload().color, write: formatColor }),
+    part('inset', { label: 'Расположение', kind: 'select', read: () => (reload().inset ? 'inset' : ''), write: v => v,
+      options: fixed([['', 'Снаружи'], ['inset', 'Внутри']]) }),
+  ];
+}
+
 const SIDES = [['top', 'сверху'], ['right', 'справа'], ['bottom', 'снизу'], ['left', 'слева']];
 
 export function blockControls(el, selector) {
@@ -215,6 +256,7 @@ export function blockControls(el, selector) {
   if (el.querySelector('svg') || el.localName === 'svg') size.push(zoom('Иконки внутри', el.localName === 'svg' ? selector : `${selector} svg`));
   groups.push({ id: 'size', label: 'Размеры', controls: size });
 
+  groups.push({ id: 'shadow', label: 'Тень', controls: shadowControls(el, selector) });
   groups.push({ id: 'fx', label: 'Эффекты', controls: [
     single({ label: 'Непрозрачность', selector, prop: 'opacity', min: 0, max: 1, step: 0.01, read: () => num(cs(el).opacity), write: v => String(v) }),
     factor({ label: 'Контраст', selector, prop: 'filter:contrast' }),

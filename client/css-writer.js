@@ -19,6 +19,15 @@ export function mediaSelector(selector, active, inactive) {
   return parts.length ? `@media ${parts.join(' and ')}{${selector}}` : selector;
 }
 
+/* the same selector, additionally inside a media condition (a screen size); merges with an existing "@media" one */
+export function withMedia(selector, cond) {
+  const m = selector.match(/^@media\s*(.+?)\s*\{(.+)\}$/s);
+  return m ? `@media ${cond} and ${m[1]}{${m[2]}}` : `@media ${cond}{${selector}}`;
+}
+
+const SHADOW = { x: 0, y: 0, blur: 0, spread: 0, color: 'rgba(0, 0, 0, 0.25)', inset: '' };
+const shadowValue = s => `${s.inset ? 'inset ' : ''}${parseFloat(s.x)}px ${parseFloat(s.y)}px ${parseFloat(s.blur)}px ${parseFloat(s.spread)}px ${s.color}`;
+
 /* imports: put the Google Fonts @import of the picked fonts first (the saved file); the live <style> loads
    fonts through <link> instead, because replacing an @import on every edit would flash the fallback font */
 export function serialize(edits, { header = false, imports = false } = {}) {
@@ -32,6 +41,12 @@ export function serialize(edits, { header = false, imports = false } = {}) {
       const fn = `${prop.slice(7)}(${value})`;
       const f = decls.find(d => d.prop === 'filter');
       if (f) f.value += ' ' + fn; else decls.push({ prop: 'filter', value: fn });
+    } else if (prop.startsWith('shadow:')) {
+      /* 'shadow:x|y|blur|spread|color|inset' + 'shadow:base' (the site's own shadow) → one box-shadow declaration;
+         a component that was not edited keeps the site's value */
+      let d = decls.find(x => x.prop === 'box-shadow');
+      if (!d) { d = { prop: 'box-shadow', value: '', shadow: {} }; decls.push(d); }
+      d.shadow[prop.slice(7)] = value;
     } else if (prop.startsWith('translate:')) {
       /* 'translate:x' + 'translate:y' → one translate declaration; a missing axis stays 0 */
       let t = decls.find(d => d.prop === 'translate');
@@ -42,10 +57,17 @@ export function serialize(edits, { header = false, imports = false } = {}) {
       decls.push({ prop, value, weak });
     }
   }
+  for (const [sel, decls] of groups) {
+    /* a lone 'shadow:base' (every shadow row was reset) must not rewrite the site's shadow */
+    const live = decls.filter(d => !d.shadow || Object.keys(d.shadow).some(k => k !== 'base'));
+    for (const d of live) if (d.shadow) d.value = shadowValue({ ...SHADOW, ...d.shadow.base, ...d.shadow, base: undefined });
+    if (live.length) groups.set(sel, live); else groups.delete(sel);
+  }
   const blocks = [...groups].map(([sel, decls]) => {
     const m = sel.match(/^@media\s*(.+?)\s*\{(.+)\}$/s);
-    return m ? `@media ${m[1]} {\n${block(m[2], decls, '  ')}}\n` : block(sel, decls);
-  });
+    return { media: !!m, text: m ? `@media ${m[1]} {\n${block(m[2], decls, '  ')}}\n` : block(sel, decls) };
+  /* media blocks go last: at equal specificity a screen-size rule must beat the rule for all screens */
+  }).sort((a, b) => a.media - b.media).map(b => b.text);
   const url = imports ? googleUrl(usedFonts(edits)) : null;
   const body = (url ? [`@import url("${url}");\n`, ...blocks] : blocks).join('\n');
   if (!header) return body;

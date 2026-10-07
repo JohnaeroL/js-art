@@ -3,6 +3,7 @@
    A control exposes keys ([{selector, prop}] it may write) and edits(v) ([{selector, prop, value, weak?}]).
    Plans are lists of [selector, prop, value|null, ui, weak] for Model.set. */
 import { formatColor } from './color.js';
+import { withMedia } from './css-writer.js';
 
 export const same = (c, a, b) => {
   if (c.kind === 'color') return formatColor(a) === formatColor(b);
@@ -32,6 +33,24 @@ export function shortcut(e) {
   if (code === 'KeyZ' || (!code && key === 'z')) return e.shiftKey ? 'redo' : 'undo';
   if (code === 'KeyY' || (!code && key === 'y')) return 'redo';
   return null;
+}
+
+/* Screens: edits made for a screen size are written inside a media condition. 768px is the usual phone/tablet split. */
+export const SCREENS = { all: null, desktop: '(min-width: 768px)', mobile: '(max-width: 767px)' };
+
+/* Rewrites the controls of the groups to read and write the selectors inside the media condition.
+   Text edits ('@…' props) belong to the HTML, not to a screen, and stay as they are. */
+export function forScreen(groups, cond) {
+  if (!cond) return groups;
+  const wrap = k => (k.prop.startsWith('@') ? k : { ...k, selector: withMedia(k.selector, cond) });
+  for (const g of groups) {
+    for (const c of g.controls) {
+      const edits = c.edits;
+      c.keys = c.keys.map(wrap);
+      c.edits = v => edits(v).map(wrap);
+    }
+  }
+  return groups;
 }
 
 /* anything but the JS-Art server's own {ok} JSON (404 page, 501 from a plain static server) means "no server" */

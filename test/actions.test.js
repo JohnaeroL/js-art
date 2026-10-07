@@ -60,3 +60,18 @@ test('saveOutcome: only a JSON {ok} body means the JS-Art server answered', () =
   assert.equal(saveOutcome(404, null), 'no-server');
   assert.equal(saveOutcome(200, { unrelated: 1 }), 'no-server');
 });
+
+test('forScreen wraps keys and edits in the media condition, but not text edits', async () => {
+  const { forScreen, SCREENS } = await import('../client/actions.js');
+  const cond = SCREENS.mobile;
+  const groups = [{ controls: [
+    px('padding-top'),
+    { kind: 'text', keys: [{ selector: '#t', prop: '@text' }], edits: v => [{ selector: '#t', prop: '@text', value: v }] },
+  ] }];
+  forScreen(groups, cond);
+  const [a, t] = groups[0].controls;
+  assert.deepEqual(a.keys, [{ selector: `@media ${cond}{.box}`, prop: 'padding-top' }]);
+  assert.equal(a.edits(5)[0].selector, `@media ${cond}{.box}`);
+  assert.equal(t.keys[0].selector, '#t');
+  assert.equal(forScreen(groups, null), groups);
+});
