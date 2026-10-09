@@ -7,8 +7,10 @@ import { detectScheme, forTheme } from './theme.js';
 import { planApply, planReset, shortcut, SCREENS, forScreen } from './actions.js';
 import { pageControls, blockControls } from './controls.js';
 import { startPicker } from './picker.js';
+import { SAMPLE, previewFamily } from './fonts.js';
+import { loadPreviewFonts } from './font-preview.js';
 
-const store = {
+const baseStore = {
   get(k, d) { try { const v = localStorage.getItem('js-art:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('js-art:' + k, JSON.stringify(v)); } catch { /* storage blocked */ } },
 };
@@ -27,6 +29,7 @@ const ICON = {
   sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
   moon: svg('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'),
   move: svg('<path d="M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3"/>'),
+  phone: svg('<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>'),
   unlock: svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>'),
 };
 
@@ -62,6 +65,8 @@ svg{width:16px;height:16px;display:block}
 .seg button.on{background:var(--bg);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .scope{margin:10px 12px 4px}
 .scr{margin-top:0}
+.scrrow{display:flex;align-items:center;gap:6px;margin:10px 12px 0}
+.scrrow .seg{flex:1}
 .note{margin:8px 12px 4px;padding:8px 10px;border-radius:8px;background:var(--bg2);color:var(--mut);font-size:11.5px;line-height:1.45}
 .blockbar{display:grid;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line)}
 .blockbar[hidden]{display:none}
@@ -96,6 +101,20 @@ summary .ib.on{color:var(--acc)}
 .hex{width:118px;text-align:left}
 .txt{display:block;width:100%;min-height:64px;margin-top:4px;padding:6px 8px;border:1px solid transparent;border-radius:6px;background:var(--bg2);color:var(--fg);font-size:12.5px;line-height:1.4;resize:vertical}
 .txt:focus{outline:none;border-color:var(--acc)}
+.choice{margin-top:4px}
+.choice button{padding:0 4px;font-size:11.5px;overflow:hidden;text-overflow:ellipsis}
+.fcur{display:flex;align-items:center;gap:6px;width:100%;height:30px;margin-top:4px;padding:0 8px;border:1px solid transparent;border-radius:6px;background:var(--bg2);text-align:left;font-size:14px}
+.fcur:hover{border-color:var(--line)}
+.fcur .fname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fcur svg{width:12px;height:12px;color:var(--mut);flex:none;transition:transform .2s}
+.fcur[aria-expanded=true] svg{transform:rotate(180deg)}
+.flist{list-style:none;margin:4px 0 0;padding:2px;max-height:264px;overflow:auto;overscroll-behavior:contain;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.flist[hidden]{display:none}
+.flist li{padding:6px 8px;border-radius:6px;cursor:pointer}
+.flist li:hover,.flist li:focus{background:var(--bg2);outline:none}
+.flist li.on{box-shadow:inset 2px 0 var(--acc)}
+.fn{display:block;font-size:10.5px;color:var(--mut)}
+.fs{display:block;font-size:17px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .opt{flex:0 1 150px;min-width:0;height:24px;padding:0 4px;border:1px solid transparent;border-radius:6px;background:var(--bg2);color:var(--fg);font-size:11.5px;cursor:pointer}
 .opt:focus{outline:none;border-color:var(--acc)}
 .opt option{background:var(--bg);color:var(--fg)}
@@ -156,10 +175,13 @@ const HTML = `
       <button type="button" role="tab" data-scope="page">Страница</button>
       <button type="button" role="tab" data-scope="block">Блок</button>
     </div>
-    <div class="seg scope scr" role="group" aria-label="Экран, для которого вносятся правки">
-      <button type="button" data-screen="all" title="Правки для любой ширины экрана">Все экраны</button>
-      <button type="button" data-screen="desktop" title="Правки только для ширины от 768px">Десктоп</button>
-      <button type="button" data-screen="mobile" title="Правки только для ширины до 767px">Мобильный</button>
+    <div class="scrrow">
+      <div class="seg" role="group" aria-label="Экран, для которого вносятся правки">
+        <button type="button" data-screen="all" title="Правки для любой ширины экрана">Все экраны</button>
+        <button type="button" data-screen="desktop" title="Правки только для ширины от 768px">Десктоп</button>
+        <button type="button" data-screen="mobile" title="Правки только для ширины до 767px">Мобильный</button>
+      </div>
+      <button class="ib" data-act="mobilewin" type="button" title="Открыть сайт в узком окне: правки двух окон общие" aria-label="Открыть в узком окне">${ICON.phone}</button>
     </div>
     <div class="seg scope scr" role="group" aria-label="Тема сайта, для которой вносятся правки">
       <button type="button" data-sitetheme="all" title="Правки для любой темы сайта">Все темы</button>
@@ -195,7 +217,10 @@ const decimals = step => (step >= 1 ? 0 : Math.ceil(-Math.log10(step) - 1e-9));
 const fmt = (v, step) => String(Number(v.toFixed(decimals(step))));
 const h = (tag, cls, html = '') => Object.assign(document.createElement(tag), { className: cls, innerHTML: html });
 
-export function mountUI({ model, onSave }) {
+/* initial: {popup: true} for the narrow helper window — it starts open on the mobile screen and keeps its
+   own choices out of localStorage, so the main window's panel is left as it was */
+export function mountUI({ model, onSave, initial = {} }) {
+  const store = initial.popup ? { get: (k, d) => ({ open: true, screen: 'mobile' }[k] ?? baseStore.get(k, d)), set() {} } : baseStore;
   const host = document.createElement('js-art-root');
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `<style>${CSS}</style>${HTML}`;
@@ -283,6 +308,99 @@ export function mountUI({ model, onSave }) {
     const r = { c, orig, row };
     sel.addEventListener('change', () => { model.begin(); apply(r, sel.value); });
     r.show = v => { sel.value = v; };
+    return r;
+  }
+
+  /* font family: a list where every font is drawn in itself, so it can be judged before it is applied */
+  function fontRow(c, orig) {
+    const row = h('div', 'ctl', `<div class="lab"><span class="name"></span><button class="rst" type="button">${ICON.reset}</button></div><button class="fcur" type="button" aria-haspopup="listbox" aria-expanded="false"><span class="fname"></span>${ICON.down}</button><ul class="flist" role="listbox" tabindex="-1" hidden></ul>`);
+    const options = c.options(orig);
+    row.querySelector('.name').textContent = c.label;
+    row.querySelector('.rst').title = 'Вернуть исходное (' + options[0].label + ')';
+    const cur = row.querySelector('.fcur'), list = row.querySelector('.flist'), fname = row.querySelector('.fname');
+    cur.setAttribute('aria-label', (c.sub ? c.sub + ' — ' : '') + c.label);
+    for (const o of options) {
+      const li = h('li', '');
+      li.setAttribute('role', 'option');
+      li.tabIndex = -1;
+      li.dataset.v = o.value;
+      const name = h('span', 'fn');
+      name.textContent = o.label;
+      li.append(name);
+      /* the site's own font is not in the catalog (or is shown by name only when it is) */
+      if (o.value && o !== options[0]) {
+        const s = h('span', 'fs');
+        s.textContent = SAMPLE;
+        s.style.fontFamily = previewFamily(o.value);
+        li.append(s);
+      }
+      list.append(li);
+    }
+    const r = { c, orig, row };
+    const items = () => [...list.children];
+    const close = () => { list.hidden = true; cur.setAttribute('aria-expanded', 'false'); };
+    const open = () => {
+      list.hidden = false;
+      cur.setAttribute('aria-expanded', 'true');
+      loadPreviewFonts();
+      const on = list.querySelector('.on');
+      if (on) on.scrollIntoView({ block: 'nearest' });
+    };
+    cur.addEventListener('click', () => (list.hidden ? open() : close()));
+    list.addEventListener('click', e => {
+      const li = e.target.closest('li');
+      if (!li) return;
+      close();
+      model.begin();
+      apply(r, li.dataset.v);
+    });
+    cur.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown' && list.hidden) { e.preventDefault(); open(); }
+      if (e.key === 'ArrowDown' && !list.hidden) { e.preventDefault(); (list.querySelector('.on') || items()[0]).focus(); }
+      if (e.key === 'Escape' && !list.hidden) { e.preventDefault(); e.stopPropagation(); close(); }
+    });
+    list.addEventListener('keydown', e => {
+      const all = items(), i = all.indexOf(root.activeElement);
+      if (e.key === 'ArrowDown' && all[i + 1]) { e.preventDefault(); all[i + 1].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); (all[i - 1] || cur).focus(); }
+      else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); root.activeElement.click(); cur.focus(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); cur.focus(); }
+    });
+    /* a click anywhere else closes the list */
+    addEventListener('pointerdown', e => { if (!list.hidden && !e.composedPath().includes(row)) close(); }, true);
+    r.show = v => {
+      const o = options.find(x => x.value === v) || options[0];
+      fname.textContent = o.label;
+      fname.style.fontFamily = v && o !== options[0] ? previewFamily(v) : '';
+      list.querySelectorAll('li').forEach(li => {
+        li.classList.toggle('on', li.dataset.v === v);
+        li.setAttribute('aria-selected', li.dataset.v === v);
+      });
+    };
+    return r;
+  }
+
+  /* a row of buttons, one per value (alignment) */
+  function choiceRow(c, orig) {
+    const row = h('div', 'ctl', `<div class="lab"><span class="name"></span><button class="rst" type="button">${ICON.reset}</button></div><div class="seg choice" role="group"></div>`);
+    row.querySelector('.name').textContent = c.label;
+    const known = c.options.find(o => o.value === orig);
+    row.querySelector('.rst').title = 'Вернуть исходное' + (known ? ` (${known.label})` : '');
+    const seg = row.querySelector('.choice');
+    seg.setAttribute('aria-label', c.label);
+    const r = { c, orig, row };
+    for (const o of c.options) {
+      const b = h('button', '');
+      b.type = 'button';
+      b.dataset.v = o.value;
+      b.textContent = o.label;
+      b.addEventListener('click', () => { model.begin(); apply(r, o.value); });
+      seg.append(b);
+    }
+    r.show = v => seg.querySelectorAll('button').forEach(b => {
+      b.classList.toggle('on', b.dataset.v === v);
+      b.setAttribute('aria-pressed', b.dataset.v === v);
+    });
     return r;
   }
 
@@ -389,7 +507,7 @@ export function mountUI({ model, onSave }) {
       let sub;
       for (const c of g.controls) {
         if (c.sub && c.sub !== sub) { sub = c.sub; det.append(Object.assign(h('div', 'sub'), { textContent: sub })); }
-        const r = ({ color: colorRow, select: selectRow, text: textRow }[c.kind] || rangeRow)(c, c.orig);
+        const r = (c.fontPreview ? fontRow : { color: colorRow, select: selectRow, text: textRow, choice: choiceRow }[c.kind] || rangeRow)(c, c.orig);
         r.group = sum.querySelector('.badge');
         r.row.querySelector('.rst').addEventListener('click', () => { model.begin(); run(planReset(r)); });
         state.rows.push(r);
@@ -790,5 +908,17 @@ export function mountUI({ model, onSave }) {
   setScope(state.scope);
   setOpen(state.open);
 
-  return { sync };
+  /* the other window saved: what was unsaved here is saved too */
+  function markSaved() { state.saved = JSON.stringify(model.list()); sync(); }
+
+  /* the narrow helper window: media queries need a real narrow viewport. Edits of both windows are shared (index.js) */
+  let helper = null;
+  if (initial.popup) act('mobilewin').hidden = true;
+  act('mobilewin').addEventListener('click', () => {
+    if (helper && !helper.closed) { helper.focus(); return; }
+    helper = window.open(location.href, 'jsart-mobile', 'popup,width=420,height=860');
+    if (!helper) say('Браузер заблокировал окно — разрешите всплывающие окна для этого сайта', 'err');
+  });
+
+  return { sync, markSaved };
 }

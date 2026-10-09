@@ -55,3 +55,21 @@ test('select values are the same only when equal', () => {
   assert.equal(same({ kind: 'select' }, 'italic', 'normal'), false);
   assert.ok(findFont('inter'));
 });
+
+test('previewUrl is one request for the whole catalog with a glyph subset', async () => {
+  const { previewUrl, previewFamily, parsePreview, FONTS: all } = await import('../client/fonts.js');
+  const u = previewUrl();
+  assert.equal((u.match(/family=/g) || []).length, all.length);
+  assert.ok(u.includes('&text=') && u.includes('family=Open+Sans:wght@400') && u.endsWith('&display=swap'));
+  assert.ok(u.length < 3500);
+  assert.equal(previewFamily('Lora'), '"jsa-Lora", serif');
+});
+
+test('parsePreview reads family, file and unicode-range of each face', async () => {
+  const { parsePreview } = await import('../client/fonts.js');
+  const css = "@font-face {\n  font-family: 'Inter';\n  src: url(https://x/y?kit=1&v=2) format('woff2');\n  unicode-range: U+41-42, U+410;\n}\n@font-face {\n  font-family: 'Lora';\n  src: url(https://x/z) format('woff2');\n}";
+  assert.deepEqual(parsePreview(css), [
+    { family: 'Inter', url: 'https://x/y?kit=1&v=2', range: 'U+41-42, U+410' },
+    { family: 'Lora', url: 'https://x/z', range: '' },
+  ]);
+});

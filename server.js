@@ -117,8 +117,9 @@ export function createServer({ root, out = 'css/js-art.css', toolDir = TOOL_DIR,
         if (!texts.every(t => t && typeof t.from === 'string' && typeof t.to === 'string' && Number.isInteger(t.index) && Number.isInteger(t.total))) {
           return json(res, 400, { ok: false, error: 'texts must be [{from, to, index, total}]' });
         }
+        const fonts = Array.isArray(data.fonts) ? data.fonts.filter(f => typeof f === 'string').slice(0, 50) : [];
         const pageFile = texts.length ? await pageHtml(root, data.page) : null;
-        try { return json(res, 200, { ok: true, ...(await save({ root, out, toolDir, css: data.css, state: data.state ?? {}, texts, pageFile })) }); }
+        try { return json(res, 200, { ok: true, ...(await save({ root, out, toolDir, css: data.css, state: data.state ?? {}, texts, pageFile, fonts })) }); }
         catch (e) { return json(res, 500, { ok: false, error: e.message }); }
       }
 

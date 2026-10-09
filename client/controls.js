@@ -8,6 +8,7 @@ import { scaleValue, mediaSelector } from './css-writer.js';
 import { declaredValue, winningDeclaration, rootColorVars, topBackgrounds } from './scan.js';
 import { groupsFor, scaledEdits, offsetEdits, factorEdits } from './cascade.js';
 import { selectorFor } from './selector.js';
+import { selfEdits, selfKeys, spot } from './align.js';
 import { isLeaf, originalText } from './texts.js';
 import { FONTS, fontOf, firstFamily, fontStack } from './fonts.js';
 
@@ -60,7 +61,7 @@ function textControl(el) {
 function fontControls({ selector, el, sub, textCase = true }) {
   let site = '';
   const family = select({
-    label: 'Шрифт', sub, selector, prop: 'font-family', write: fontStack,
+    label: 'Шрифт', sub, selector, prop: 'font-family', write: fontStack, fontPreview: true,
     read: () => { site = firstFamily(cs(el).fontFamily); return (fontOf(site) || {}).name || ''; },
     options: orig => [{ value: orig, label: site ? `Как на сайте (${site})` : 'Как на сайте' },
       ...FONTS.filter(f => f.name !== orig).map(f => ({ value: f.name, label: f.name }))],
@@ -216,6 +217,87 @@ function shadowControls(el, selector) {
   ];
 }
 
+/* kind 'choice': a row of buttons, one value each; edits(v) may return value null to remove an edit */
+function choice({ label, sub, selector, keys, options, read, edits }) {
+  return {
+    kind: 'choice', label, sub, unit: '', step: 1, options, read,
+    keys: keys.map(prop => ({ selector, prop })),
+    edits: v => edits(v).map(([prop, value]) => ({ selector, prop, value })),
+  };
+}
+
+const layoutOf = el => {
+  const p = el.parentElement;
+  if (!p) return 'block';
+  const s = cs(p);
+  if (/grid/.test(s.display)) return 'grid';
+  if (/flex/.test(s.display)) return /column/.test(s.flexDirection) ? 'flex-col' : 'flex-row';
+  return 'block';
+};
+
+const REPLACED = /^(img|svg|video|canvas|iframe|input|select|textarea)$/;
+const FLEX_MAP = { normal: 'flex-start', start: 'flex-start', left: 'flex-start', end: 'flex-end', right: 'flex-end' };
+
+/* alignment: the block inside its parent, its text, and (flex/grid) its content */
+function alignControls(el, selector) {
+  const controls = [];
+  const layout = layoutOf(el), p = el.parentElement;
+  const gaps = axis => {
+    const r = el.getBoundingClientRect(), pr = p.getBoundingClientRect(), s = cs(p);
+    const [a, b, pa, pb, ba, bb] = axis === 'x'
+      ? ['left', 'right', 'paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth']
+      : ['top', 'bottom', 'paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'];
+    return [r[a] - (pr[a] + num(s[pa]) + num(s[ba])), (pr[b] - num(s[pb]) - num(s[bb])) - r[b]];
+  };
+  const opts = (a, b, c) => [{ value: 'start', label: a }, { value: 'center', label: b }, { value: 'end', label: c }];
+
+  if (p) {
+    const state = { fills: false, inlineLevel: false };
+    controls.push(choice({
+      label: 'Блок по горизонтали', selector, keys: selfKeys(layout, 'x'), options: opts('Слева', 'По центру', 'Справа'),
+      read: () => {
+        const [before, after] = gaps('x');
+        state.inlineLevel = layout === 'block' && /^inline/.test(cs(el).display);
+        state.fills = layout === 'block' && before < 2 && after < 2; /* spans the whole row: must shrink to be moved */
+        return spot(before, after);
+      },
+      edits: v => selfEdits(layout, 'x', v, { ...state, replaced: REPLACED.test(el.localName) }),
+    }));
+    if (layout !== 'block') {
+      controls.push(choice({
+        label: 'Блок по вертикали', selector, keys: selfKeys(layout, 'y'), options: opts('Сверху', 'По центру', 'Снизу'),
+        read: () => spot(...gaps('y')),
+        edits: v => selfEdits(layout, 'y', v),
+      }));
+    }
+  }
+
+  const TEXT = { start: 'left', end: 'right', 'match-parent': 'left' };
+  controls.push(choice({
+    label: 'Текст внутри', selector, keys: ['text-align'],
+    options: [{ value: 'left', label: 'Слева' }, { value: 'center', label: 'Центр' }, { value: 'right', label: 'Справа' }, { value: 'justify', label: 'По ширине' }],
+    read: () => { const t = cs(el).textAlign; return TEXT[t] || t; },
+    edits: v => [['text-align', v]],
+  }));
+
+  if (/flex|grid/.test(cs(el).display)) {
+    const dir = /column/.test(cs(el).flexDirection) ? 'column' : 'row';
+    controls.push(choice({
+      label: 'Содержимое по главной оси', selector, keys: ['justify-content'],
+      options: [['flex-start', 'Начало'], ['center', 'Центр'], ['flex-end', 'Конец'], ['space-between', 'Между'], ['space-around', 'Вокруг']].map(([value, label]) => ({ value, label })),
+      read: () => { const v = cs(el).justifyContent; return FLEX_MAP[v] || v; },
+      edits: v => [['justify-content', v]],
+    }));
+    controls.push(choice({
+      label: dir === 'column' ? 'Содержимое по горизонтали' : 'Содержимое по вертикали', selector, keys: ['align-items'],
+      options: [['flex-start', 'Начало'], ['center', 'Центр'], ['flex-end', 'Конец'], ['stretch', 'Растянуть']].map(([value, label]) => ({ value, label })),
+      read: () => { const v = cs(el).alignItems; return v === 'normal' ? 'stretch' : FLEX_MAP[v] || v; },
+      edits: v => [['align-items', v]],
+    }));
+  }
+  return controls;
+}
+
 const SIDES = [['top', 'сверху'], ['right', 'справа'], ['bottom', 'снизу'], ['left', 'слева']];
 
 export function blockControls(el, selector) {
@@ -231,6 +313,7 @@ export function blockControls(el, selector) {
   if (pd && /flex|grid/.test(pd)) {
     pos.push(single({ label: 'Порядок (order)', selector, prop: 'order', min: -10, max: 10, step: 1, read: () => parseInt(cs(el).order, 10) || 0, write: v => String(v) }));
   }
+  groups.push({ id: 'align', label: 'Выравнивание', controls: alignControls(el, selector) });
   groups.push({ id: 'pos', label: 'Положение', controls: pos });
   if (isLeaf(el)) groups.unshift({ id: 'text', label: 'Текст', controls: [textControl(el)] });
   groups.push({ id: 'colors', label: 'Цвета', controls: [

@@ -7,7 +7,7 @@ import { withMedia } from './css-writer.js';
 
 export const same = (c, a, b) => {
   if (c.kind === 'color') return formatColor(a) === formatColor(b);
-  if (c.kind === 'select' || c.kind === 'text') return a === b;
+  if (c.kind === 'select' || c.kind === 'text' || c.kind === 'choice') return a === b;
   return Math.abs(a - b) < c.step / 2;
 };
 

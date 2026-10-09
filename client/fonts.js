@@ -74,3 +74,31 @@ export const usedFonts = edits => [...new Set(edits
   .map(e => fontOf(e.value))
   .filter(Boolean)
   .map(f => f.name))];
+
+/* ───── preview in the picker ───── */
+
+export const SAMPLE = 'Съешь ещё этих мягких булок 123';
+const ALPHABET = 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюяABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,!?-—';
+
+/* One Google Fonts request for the whole catalog, regular weight, only the glyphs the picker shows:
+   a few KB per family instead of full font files. */
+export function previewUrl() {
+  const fams = FONTS.map(f => `family=${encodeURIComponent(f.name).replace(/%20/g, '+')}:wght@${f.weights.includes(400) ? 400 : f.weights[0]}`);
+  const glyphs = [...new Set(ALPHABET + SAMPLE)].join('');
+  return `https://fonts.googleapis.com/css2?${fams.join('&')}&text=${encodeURIComponent(glyphs)}&display=swap`;
+}
+
+/* The picker draws samples with its own family names, so they never touch the site's fonts of the same name */
+export const previewFamily = name => `"jsa-${name}", ${(findFont(name) || { category: 'sans-serif' }).category}`;
+
+/* [{family, url, range}] from the preview css */
+export function parsePreview(css) {
+  const out = [];
+  for (const block of css.split('@font-face').slice(1)) {
+    const family = /font-family:\s*'([^']+)'/.exec(block);
+    const url = /url\(([^)]+)\)/.exec(block);
+    const range = /unicode-range:\s*([^;}]+)/.exec(block);
+    if (family && url) out.push({ family: family[1], url: url[1].replace(/['"]/g, ''), range: range ? range[1].trim() : '' });
+  }
+  return out;
+}
