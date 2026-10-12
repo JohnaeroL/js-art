@@ -7,6 +7,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { save } from './lib/save.js';
+import { createUpdater } from './lib/update.js';
 
 const TOOL_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = '<script type="module" src="/__js-art/client/index.js"></script>';
@@ -88,8 +89,12 @@ function originOk(origin, port) {
   } catch { return false; }
 }
 
-export function createServer({ root, out = 'css/js-art.css', toolDir = TOOL_DIR, clientDir = path.join(toolDir, 'client') }) {
+/* exit code the launcher (start-js-art.bat) restarts the server on, after an update has changed the server's own code */
+export const RESTART_CODE = 42;
+
+export function createServer({ root, out = 'css/js-art.css', toolDir = TOOL_DIR, clientDir = path.join(toolDir, 'client'), updater = null }) {
   root = path.resolve(root);
+  const up = updater || createUpdater({ dir: toolDir });
   return http.createServer(async (req, res) => {
     try {
       const port = req.socket.localPort;
@@ -105,6 +110,17 @@ export function createServer({ root, out = 'css/js-art.css', toolDir = TOOL_DIR,
       if (url.pathname === '/__js-art/state') {
         try { return send(res, 200, await fs.readFile(path.join(toolDir, 'state.json')), TYPES['.json']); }
         catch { return json(res, 200, {}); }
+      }
+      if (url.pathname === '/__js-art/update') {
+        if (req.method === 'GET') return json(res, 200, await up.check());
+        if (req.method !== 'POST') return send(res, 405, 'Method not allowed');
+        if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) { req.resume(); return send(res, 415, 'Content-Type must be application/json'); }
+        await readBody(req);
+        const r = await up.apply();
+        json(res, 200, { ...r, to: r.latest, restart: !!process.env.JSART_BAT });
+        /* the server's own code changed: the launcher restarts it, a plain `node server.js` just needs a restart */
+        if (r.updated && process.env.JSART_BAT) res.once('finish', () => setTimeout(() => process.exit(RESTART_CODE), 300));
+        return;
       }
       if (url.pathname === '/__js-art/save') {
         if (req.method !== 'POST') return send(res, 405, 'Method not allowed');
@@ -161,6 +177,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   });
   server.listen(o.port, '127.0.0.1', () => {
     console.log(`JS-Art: http://localhost:${o.port}  (root: ${path.resolve(o.root)}, save → ${o.out})`);
-    if (o.open) openBrowser(page);
+    /* a restart after an update reuses the page that is already open */
+    if (o.open && !process.env.JSART_RESTART) openBrowser(page);
   });
 }

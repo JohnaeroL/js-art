@@ -4,6 +4,7 @@ import { toHex, formatColor, parseColor } from './color.js';
 import { selectorFor } from './selector.js';
 import { withOverridesDisabled, classStats, themeSources } from './scan.js';
 import { detectScheme, forTheme } from './theme.js';
+import { checkStatus, applyStatus } from './update.js';
 import { planApply, planReset, shortcut, SCREENS, forScreen } from './actions.js';
 import { pageControls, blockControls } from './controls.js';
 import { startPicker } from './picker.js';
@@ -29,6 +30,7 @@ const ICON = {
   sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
   moon: svg('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'),
   move: svg('<path d="M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3"/>'),
+  refresh: svg('<path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/>'),
   phone: svg('<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>'),
   unlock: svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>'),
 };
@@ -59,6 +61,7 @@ svg{width:16px;height:16px;display:block}
 .ib{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--mut)}
 .ib:hover:not(:disabled){background:var(--bg2);color:var(--fg)}
 .ib.on{background:var(--acc);color:var(--acc-fg)}
+.ib.armed{color:#e5484d;background:var(--bg2)}
 .ib:disabled{opacity:.35;cursor:default}
 .seg{display:flex;gap:2px;padding:2px;border-radius:8px;background:var(--bg2)}
 .seg button{flex:1;height:26px;padding:0 8px;border-radius:6px;font-weight:500;color:var(--mut);white-space:nowrap}
@@ -167,6 +170,7 @@ const HTML = `
     <header class="top">
       <span class="brand">${LOGO}</span>
       <button class="ib" data-act="theme" type="button"></button>
+      <button class="ib" data-act="update" type="button" title="Проверить обновления с GitHub" aria-label="Проверить обновления">${ICON.refresh}</button>
       <button class="ib" data-act="undo" type="button" title="Отменить (Ctrl+Z)" aria-label="Отменить">${ICON.undo}</button>
       <button class="ib" data-act="redo" type="button" title="Повторить (Ctrl+Shift+Z)" aria-label="Повторить">${ICON.redo}</button>
       <button class="ib" data-act="close" type="button" title="Свернуть (Esc)" aria-label="Свернуть">${ICON.close}</button>
@@ -837,6 +841,36 @@ export function mountUI({ model, onSave, initial = {} }) {
   });
   dark.addEventListener('change', applyTheme);
   applyTheme();
+
+  /* updates: the first click checks GitHub, a click on an offered update applies it (fast-forward only, see lib/update.js) */
+  const updBtn = act('update');
+  let updArmed = 0;
+  const disarmUpdate = () => { clearTimeout(updArmed); updArmed = 0; updBtn.classList.remove('armed'); };
+  async function updateCall(method) {
+    const res = await fetch('/__js-art/update', method === 'POST'
+      ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' } : {});
+    return res.json();
+  }
+  updBtn.addEventListener('click', async () => {
+    if (updArmed) {
+      disarmUpdate();
+      say('Обновление…');
+      try {
+        const r = applyStatus(await updateCall('POST'));
+        say(r.text, r.kind);
+      } catch { say('Нет связи с сервером JS-Art — обновление доступно только при запуске через сервер', 'err'); }
+      return;
+    }
+    say('Проверка обновлений…');
+    try {
+      const s = checkStatus(await updateCall('GET'));
+      say(s.text, s.kind);
+      if (s.armed) {
+        updBtn.classList.add('armed');
+        updArmed = setTimeout(disarmUpdate, 8000);
+      }
+    } catch { say('Нет связи с сервером JS-Art — проверка обновлений доступна только при запуске через сервер', 'err'); }
+  });
 
   act('close').addEventListener('click', () => setOpen(false));
   act('undo').addEventListener('click', () => model.undo());
