@@ -32,3 +32,10 @@ test('after an update the text tells whether the server restarts itself', () => 
   assert.match(applyStatus({ ok: true, updated: true, to: 'bbb2222', restart: false }).text, /перезапустите сервер/);
   assert.equal(applyStatus({ ok: true, updated: true, to: 'bbb2222' }).kind, 'ok');
 });
+
+test('an old server (404) asks for a restart, a network failure says there is no server', async () => {
+  const { noRouteText } = await import('../client/update.js');
+  assert.match(noRouteText(404), /перезапустите сервер/);
+  assert.match(noRouteText(500), /ошибкой 500/);
+  assert.match(noRouteText(0), /Нет связи/);
+});

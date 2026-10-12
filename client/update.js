@@ -31,3 +31,10 @@ export function applyStatus(r) {
     : 'перезапустите сервер и обновите страницу';
   return { text: `Обновлено до ${r.to || r.latest}: ${next}`, kind: 'ok', armed: false };
 }
+
+/* what to say when the update route did not answer with JSON: an old server without it answers 404 */
+export function noRouteText(status) {
+  if (status === 404) return 'Сервер запущен старой версией без проверки обновлений — перезапустите сервер (start-js-art.bat)';
+  if (status) return `Сервер ответил ошибкой ${status} — проверка обновлений недоступна`;
+  return 'Нет связи с сервером JS-Art — проверка обновлений доступна только при запуске через сервер';
+}

@@ -4,7 +4,7 @@ import { toHex, formatColor, parseColor } from './color.js';
 import { selectorFor } from './selector.js';
 import { withOverridesDisabled, classStats, themeSources } from './scan.js';
 import { detectScheme, forTheme } from './theme.js';
-import { checkStatus, applyStatus } from './update.js';
+import { checkStatus, applyStatus, noRouteText } from './update.js';
 import { planApply, planReset, shortcut, SCREENS, forScreen } from './actions.js';
 import { pageControls, blockControls } from './controls.js';
 import { startPicker } from './picker.js';
@@ -846,11 +846,15 @@ export function mountUI({ model, onSave, initial = {} }) {
   const updBtn = act('update');
   let updArmed = 0;
   const disarmUpdate = () => { clearTimeout(updArmed); updArmed = 0; updBtn.classList.remove('armed'); };
+  /* a server without this route (started before the feature) answers 404 with plain text, not JSON */
   async function updateCall(method) {
     const res = await fetch('/__js-art/update', method === 'POST'
       ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' } : {});
-    return res.json();
+    const data = await res.json().catch(() => null);
+    if (!data) throw Object.assign(new Error('not json'), { status: res.status });
+    return data;
   }
+  const updateFailed = e => say(noRouteText(e.status), 'err');
   updBtn.addEventListener('click', async () => {
     if (updArmed) {
       disarmUpdate();
@@ -858,7 +862,7 @@ export function mountUI({ model, onSave, initial = {} }) {
       try {
         const r = applyStatus(await updateCall('POST'));
         say(r.text, r.kind);
-      } catch { say('Нет связи с сервером JS-Art — обновление доступно только при запуске через сервер', 'err'); }
+      } catch (e) { updateFailed(e); }
       return;
     }
     say('Проверка обновлений…');
@@ -869,7 +873,7 @@ export function mountUI({ model, onSave, initial = {} }) {
         updBtn.classList.add('armed');
         updArmed = setTimeout(disarmUpdate, 8000);
       }
-    } catch { say('Нет связи с сервером JS-Art — проверка обновлений доступна только при запуске через сервер', 'err'); }
+    } catch (e) { updateFailed(e); }
   });
 
   act('close').addEventListener('click', () => setOpen(false));
